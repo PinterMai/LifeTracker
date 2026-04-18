@@ -1,0 +1,21 @@
+# Claude context (ne spada v repo)
+PROJECT_CONTEXT.md
+
+# Build results
+bin/
+obj/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# .NET
+*.dll
+*.exe
+*.pdb
+
+# SQLite database (lokalna data, ne v repo)
+*.db
+*.db-shm
+*.db-wal
