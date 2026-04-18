@@ -1,5 +1,6 @@
 # Claude context (ne spada v repo)
 PROJECT_CONTEXT.md
+.claude/
 
 # Build results
 bin/
