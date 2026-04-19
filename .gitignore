@@ -20,3 +20,7 @@ obj/
 *.db
 *.db-shm
 *.db-wal
+
+# Secrets and environment variables
+.env
+.env.*
