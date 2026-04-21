@@ -3,6 +3,7 @@
 @using LifeTracker.Core.Interfaces
 @using LifeTracker.Core.Models
 @inject ITradeRepository Repository
+@inject IAiService Ai
 @inject NavigationManager Nav
 
 <PageTitle>@(Id is null ? "New trade" : $"Edit {_trade.Ticker}")</PageTitle>
@@ -68,6 +69,11 @@
         </button>
         @if (Id is not null)
         {
+            <button type="button" class="btn btn-secondary"
+                    @onclick="AnalyzeAsync"
+                    disabled="@(_isSaving || _isAnalyzing)">
+                @(_isAnalyzing ? "Analyzing…" : "Analyze")
+            </button>
             <button type="button" class="btn btn-danger" @onclick="DeleteAsync" disabled="@_isSaving">
                 Delete
             </button>
@@ -75,11 +81,31 @@
     </div>
 </EditForm>
 
+@if (_analysis is not null)
+{
+    <div class="analysis-card">
+        <div class="analysis-header">
+            <strong>AI feedback</strong>
+            <span class="muted">
+                @_analysis.Model · @_analysis.InputTokens in / @_analysis.OutputTokens out
+            </span>
+        </div>
+        <p class="analysis-text">@_analysis.Text</p>
+    </div>
+}
+@if (_analysisError is not null)
+{
+    <div class="analysis-error">@_analysisError</div>
+}
+
 @code {
     [Parameter] public int? Id { get; set; }
 
     private Trade _trade = new();
     private bool _isSaving;
+    private bool _isAnalyzing;
+    private AiAnalysis? _analysis;
+    private string? _analysisError;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -130,6 +156,33 @@
         finally
         {
             _isSaving = false;
+        }
+    }
+
+    private async Task AnalyzeAsync()
+    {
+        if (_trade.Id == 0) return;
+
+        _isAnalyzing = true;
+        _analysisError = null;
+        _analysis = null;
+
+        try
+        {
+            var all = await Repository.GetAllAsync();
+            _analysis = await Ai.AnalyzeTradeAsync(_trade, all.ToList());
+        }
+        catch (InvalidOperationException ex)
+        {
+            _analysisError = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            _analysisError = $"AI call failed: {ex.Message}";
+        }
+        finally
+        {
+            _isAnalyzing = false;
         }
     }
 }
@@ -257,6 +310,50 @@
         color: #a0a0b0;
         cursor: pointer;
         padding: 0.5rem;
+    }
+
+    .btn-secondary {
+        padding: 0.75rem 1.25rem;
+        background: transparent;
+        color: #f0f0f5;
+        border: 1px solid #2a2f36;
+        border-radius: 8px;
+        cursor: pointer;
+        font-weight: 600;
+    }
+
+    .btn-secondary:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    .analysis-card {
+        margin-top: 1.5rem;
+        background: #1f2328;
+        border-radius: 12px;
+        padding: 1rem 1.25rem;
+        border-left: 3px solid #93c5fd;
+    }
+
+    .analysis-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.5rem;
+        font-size: 0.9rem;
+    }
+
+    .analysis-header .muted { color: #8a8a99; font-size: 0.8rem; }
+
+    .analysis-text {
+        margin: 0;
+        white-space: pre-wrap;
+        line-height: 1.5;
+    }
+
+    .analysis-error {
+        margin-top: 1rem;
+        background: #7f1d1d;
+        color: #f87171;
+        padding: 0.75rem 1rem;
+        border-radius: 8px;
     }
 
     @@media (max-width: 600px) {

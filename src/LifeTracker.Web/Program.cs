@@ -30,6 +30,13 @@ builder.Services.AddScoped<ITradeRepository>(sp =>
         sp.GetRequiredService<TradeRepository>(),
         sp.GetRequiredService<BrowserDbPersistence>()));
 
+// --- AI layer ---
+// Settings live in localStorage; the Gemini service reads the API key
+// from there on every call so the user can paste/clear it at runtime
+// without touching DI.
+builder.Services.AddScoped<ISettingsService, BrowserSettings>();
+builder.Services.AddScoped<IAiService, GeminiAiService>();
+
 var host = builder.Build();
 
 // Hydrate SQLite file from IndexedDB (if any) and ensure schema is created.

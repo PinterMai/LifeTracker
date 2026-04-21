@@ -1,0 +1,251 @@
+@page "/settings"
+@using LifeTracker.Core.Interfaces
+@inject ISettingsService SettingsSvc
+@inject IAiService Ai
+
+<PageTitle>Settings</PageTitle>
+
+<div class="settings-page">
+    <h1>Settings</h1>
+
+    <section class="card">
+        <h2>AI provider</h2>
+        <p class="muted">
+            The AI backend used for "Analyze" on trades. Gemini has a generous
+            free tier — get a key at
+            <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.
+        </p>
+
+        <div class="form-row">
+            <label>API key</label>
+            <div class="key-row">
+                <input type="@(_showKey ? "text" : "password")"
+                       class="form-control"
+                       @bind="_apiKey"
+                       placeholder="AIza…" />
+                <button type="button" class="btn btn-secondary"
+                        @onclick="() => _showKey = !_showKey">
+                    @(_showKey ? "Hide" : "Show")
+                </button>
+            </div>
+            <p class="hint">Stored in this browser's localStorage. Origin-scoped, not synced anywhere.</p>
+        </div>
+
+        <div class="form-row">
+            <label>Model</label>
+            <input type="text" class="form-control" @bind="_model" placeholder="gemini-1.5-flash" />
+            <p class="hint">Default <code>gemini-1.5-flash</code> is free up to 15 req/min.</p>
+        </div>
+
+        <div class="form-actions">
+            <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_isBusy">Save</button>
+            <button class="btn btn-secondary" @onclick="TestAsync" disabled="@(_isBusy || string.IsNullOrWhiteSpace(_apiKey))">
+                @(_isBusy ? "Testing…" : "Test connection")
+            </button>
+            @if (!string.IsNullOrEmpty(_apiKey))
+            {
+                <button class="btn btn-danger" @onclick="ClearAsync" disabled="@_isBusy">Remove key</button>
+            }
+        </div>
+
+        @if (_status is not null)
+        {
+            <div class="status @_statusKind">@_status</div>
+        }
+    </section>
+</div>
+
+@code {
+    private string _apiKey = string.Empty;
+    private string _model = string.Empty;
+    private bool _showKey;
+    private bool _isBusy;
+    private string? _status;
+    private string _statusKind = "info";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _apiKey = await SettingsSvc.GetAsync(SettingsKeys.AiApiKey) ?? string.Empty;
+        _model = await SettingsSvc.GetAsync(SettingsKeys.AiModel) ?? "gemini-1.5-flash";
+    }
+
+    private async Task SaveAsync()
+    {
+        _isBusy = true;
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_apiKey))
+            {
+                await SettingsSvc.RemoveAsync(SettingsKeys.AiApiKey);
+            }
+            else
+            {
+                await SettingsSvc.SetAsync(SettingsKeys.AiApiKey, _apiKey.Trim());
+            }
+
+            await SettingsSvc.SetAsync(SettingsKeys.AiModel,
+                string.IsNullOrWhiteSpace(_model) ? "gemini-1.5-flash" : _model.Trim());
+
+            Show("Saved.", "success");
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private async Task TestAsync()
+    {
+        _isBusy = true;
+        Show("Testing…", "info");
+        try
+        {
+            // Save first so the service can read the latest key.
+            await SaveAsync();
+
+            var ok = await Ai.TestConnectionAsync();
+            Show(ok ? "Connection OK." : "Connection failed. Check the key and model.",
+                 ok ? "success" : "error");
+        }
+        catch (Exception ex)
+        {
+            Show(ex.Message, "error");
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private async Task ClearAsync()
+    {
+        _isBusy = true;
+        try
+        {
+            await SettingsSvc.RemoveAsync(SettingsKeys.AiApiKey);
+            _apiKey = string.Empty;
+            Show("Key removed.", "success");
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private void Show(string message, string kind)
+    {
+        _status = message;
+        _statusKind = kind;
+    }
+}
+
+<style>
+    .settings-page {
+        padding: 1.5rem;
+        max-width: 720px;
+        margin: 0 auto;
+    }
+
+    .card {
+        background: #1f2328;
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin-bottom: 1rem;
+    }
+
+    .card h2 {
+        margin-top: 0;
+        margin-bottom: 0.5rem;
+    }
+
+    .muted { color: #a0a0b0; }
+
+    .form-row {
+        margin-bottom: 1rem;
+    }
+
+    .form-row label {
+        display: block;
+        font-size: 0.85rem;
+        color: #a0a0b0;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 0.3rem;
+    }
+
+    .form-control {
+        background: #14161a;
+        border: 1px solid #2a2f36;
+        color: #f0f0f5;
+        border-radius: 8px;
+        padding: 0.6rem 0.75rem;
+        width: 100%;
+    }
+
+    .form-control:focus { border-color: #4ade80; outline: none; }
+
+    .key-row {
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    .key-row .form-control { flex: 1; }
+
+    .hint {
+        font-size: 0.8rem;
+        color: #8a8a99;
+        margin: 0.3rem 0 0 0;
+    }
+
+    .hint code {
+        background: #14161a;
+        padding: 0.1rem 0.35rem;
+        border-radius: 4px;
+    }
+
+    .form-actions {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        margin-top: 1rem;
+    }
+
+    .btn {
+        padding: 0.6rem 1rem;
+        border-radius: 8px;
+        font-weight: 600;
+        cursor: pointer;
+        border: 1px solid transparent;
+    }
+
+    .btn-primary {
+        background: #4ade80;
+        color: #052e16;
+        border-color: #4ade80;
+    }
+
+    .btn-secondary {
+        background: transparent;
+        color: #f0f0f5;
+        border-color: #2a2f36;
+    }
+
+    .btn-danger {
+        background: transparent;
+        color: #f87171;
+        border-color: #f87171;
+    }
+
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    .status {
+        margin-top: 1rem;
+        padding: 0.75rem 1rem;
+        border-radius: 8px;
+        font-size: 0.9rem;
+    }
+
+    .status.success { background: #14532d; color: #4ade80; }
+    .status.error { background: #7f1d1d; color: #f87171; }
+    .status.info { background: #1e3a5f; color: #93c5fd; }
+</style>
