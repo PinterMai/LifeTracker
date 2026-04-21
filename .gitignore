@@ -5,6 +5,7 @@ PROJECT_CONTEXT.md
 # Build results
 bin/
 obj/
+publish/
 
 # Visual Studio
 .vs/

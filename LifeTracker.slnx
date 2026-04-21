@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/LifeTracker.Core/LifeTracker.Core.csproj" />
     <Project Path="src/LifeTracker.Data/LifeTracker.Data.csproj" />
+    <Project Path="src/LifeTracker.Web/LifeTracker.Web.csproj" />
     <Project Path="src/LifeTracker.WPF/LifeTracker.WPF.csproj" />
   </Folder>
   <Folder Name="/tests/">
