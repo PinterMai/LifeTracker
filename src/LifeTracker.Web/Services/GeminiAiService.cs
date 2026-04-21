@@ -14,7 +14,10 @@ namespace LifeTracker.Web.Services;
 /// </summary>
 public sealed class GeminiAiService : IAiService
 {
-    public const string DefaultModel = "gemini-1.5-flash";
+    // Google's "latest" alias — always resolves to the current free-tier
+    // flash model. Concrete versions like gemini-1.5-flash get deprecated
+    // and cause 404 / 503 errors on freshly issued keys.
+    public const string DefaultModel = "gemini-flash-latest";
     private const string BaseUrl = "https://generativelanguage.googleapis.com/v1beta/models";
 
     private readonly HttpClient _http;

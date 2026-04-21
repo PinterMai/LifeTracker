@@ -33,8 +33,11 @@
 
         <div class="form-row">
             <label>Model</label>
-            <input type="text" class="form-control" @bind="_model" placeholder="gemini-1.5-flash" />
-            <p class="hint">Default <code>gemini-1.5-flash</code> is free up to 15 req/min.</p>
+            <input type="text" class="form-control" @bind="_model" placeholder="gemini-flash-latest" />
+            <p class="hint">
+                Default <code>gemini-flash-latest</code> — Google's current free-tier flash alias.
+                Concrete versions like <code>gemini-1.5-flash</code> get retired and stop working on new keys.
+            </p>
         </div>
 
         <div class="form-actions">
@@ -66,7 +69,7 @@
     protected override async Task OnInitializedAsync()
     {
         _apiKey = await SettingsSvc.GetAsync(SettingsKeys.AiApiKey) ?? string.Empty;
-        _model = await SettingsSvc.GetAsync(SettingsKeys.AiModel) ?? "gemini-1.5-flash";
+        _model = await SettingsSvc.GetAsync(SettingsKeys.AiModel) ?? Services.GeminiAiService.DefaultModel;
     }
 
     private async Task SaveAsync()
@@ -84,7 +87,7 @@
             }
 
             await SettingsSvc.SetAsync(SettingsKeys.AiModel,
-                string.IsNullOrWhiteSpace(_model) ? "gemini-1.5-flash" : _model.Trim());
+                string.IsNullOrWhiteSpace(_model) ? Services.GeminiAiService.DefaultModel : _model.Trim());
 
             Show("Saved.", "success");
         }
