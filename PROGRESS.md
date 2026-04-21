@@ -1,5 +1,41 @@
 # Progress log
 
+## 2026-04-21 — Session 4: GitHub Pages live + Phase 2 AI (Gemini)
+
+### Deployed
+
+- Previous session's commits pushed in five conventional-commit groups (chore, feat, ci, test, docs).
+- GitHub Pages enabled; deploy workflow succeeded on re-run.
+- Fixed SPA routing bug: absolute `/trades` links ignored `<base href="/LifeTracker/">` and 404'd. All in-app links and `NavigateTo` calls switched to relative paths.
+- App live and installable to iPhone home screen.
+
+### Built (Phase 2 — AI trade analysis)
+
+- `Core/Interfaces/IAiService` + `Models/AiAnalysis` — provider-agnostic contract.
+- `Core/Interfaces/ISettingsService` + `SettingsKeys` + `AiProvider` enum.
+- `Core/Services/TradePromptBuilder` — pure prompt builder taking Trade + history, clamped to N most recent prior trades. Covered by 6 xUnit tests.
+- `Web/Services/BrowserSettings` — `ISettingsService` over `localStorage` via `wwwroot/js/settings.js`.
+- `Web/Services/GeminiAiService` — direct HTTP call to `generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`. Reads key + model from settings each call.
+- `Pages/Settings.razor` — key paste, show/hide toggle, model override, Test connection, Remove key.
+- `Pages/Trades/TradeEdit.razor` — Analyze button (visible only on saved trades) renders AI feedback inline with token counts.
+- DI wiring in `Program.cs`.
+
+### Why Gemini
+
+Claude API has no free tier; Gemini's free tier (15 req/min, 1500 req/day of `gemini-1.5-flash`) is enough for personal use. `IAiService` is abstract so adding `ClaudeAiService` later is a one-line DI swap.
+
+### Verified
+
+- `dotnet build` — 0 errors, 0 warnings.
+- `dotnet test` — 18/18 passing (12 Trade + 6 prompt builder).
+
+### Not yet done
+
+- Smoke test AI on live deploy (user to paste Gemini key + click Analyze).
+- Weekly summary / multi-trade analysis.
+- Phase 3 — X signal ingestion (architecture TBD for pure PWA; likely manual paste + AI parse).
+- Remove legacy `LifeTracker.WPF` once PWA is confirmed stable on device.
+
 ## 2026-04-20 — Session 3: Blazor PWA pivot
 
 ### Decision

@@ -67,6 +67,22 @@ GitHub Actions (`.github/workflows/deploy.yml`):
 
 Public URL: `https://pintermai.github.io/LifeTracker/` once Pages is enabled in the repo settings (Settings → Pages → Source: GitHub Actions).
 
+## AI layer
+
+Gemini and Claude both accept direct browser calls. We talk to the provider's HTTPS endpoint straight from WASM — no proxy, no server.
+
+- `Core/Interfaces/IAiService` — `AnalyzeTradeAsync`, `TestConnectionAsync`. Pure contract.
+- `Core/Services/TradePromptBuilder` — pure prompt assembly (trade + last N history). Unit tested.
+- `Core/Interfaces/ISettingsService` + `SettingsKeys` — provider-agnostic key/value abstraction.
+- `Web/Services/GeminiAiService` — implementation against `generativelanguage.googleapis.com`. Reads the API key and model from `ISettingsService` on every call so Settings edits take effect immediately.
+- `Web/Services/BrowserSettings` — `ISettingsService` backed by browser `localStorage` via a small ES module (`wwwroot/js/settings.js`). Values are origin-scoped, not synced, not encrypted. Same trust boundary as any password the user types into the browser.
+
+Swapping providers is a DI one-liner: write `ClaudeAiService : IAiService`, register it in `Program.cs` instead of `GeminiAiService`. Prompt builder and UI stay identical.
+
+### Why Gemini first, not Claude
+
+Gemini's free tier is real: 15 req/min and 1500 req/day of `gemini-1.5-flash` with no credit card. For a personal trade journal that's essentially unlimited. Claude API has no free tier — once the user wants the extra quality we wire in `ClaudeAiService` alongside and let them pick in Settings.
+
 ## Future modules (designed for, not built)
 
-Same pattern per module: model in Core, DbSet on `AppDbContext`, repository in Data, pages in `Web/Pages/<Module>/`. Phase 2 adds an AI service in `Core/Services` gated by a user-supplied API key. Phase 3 adds signal ingestion — in a web context this requires a local companion process (browser extension cannot post into its own origin), design TBD.
+Same pattern per module: model in Core, DbSet on `AppDbContext`, repository in Data, pages in `Web/Pages/<Module>/`. Phase 3 adds signal ingestion — in a web context this requires a local companion process (browser extension cannot post into its own origin), design TBD.
