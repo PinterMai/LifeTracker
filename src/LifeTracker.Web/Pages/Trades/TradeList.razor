@@ -8,7 +8,7 @@
 
 <div class="trades-header">
     <h1>Trades</h1>
-    <button class="btn btn-primary" @onclick="@(() => Nav.NavigateTo("/trades/new"))">+ New trade</button>
+    <button class="btn btn-primary" @onclick="@(() => Nav.NavigateTo("trades/new"))">+ New trade</button>
 </div>
 
 @if (_trades is null)
@@ -19,7 +19,7 @@ else if (_trades.Count == 0)
 {
     <div class="empty-state">
         <p>No trades logged yet.</p>
-        <button class="btn btn-primary" @onclick="@(() => Nav.NavigateTo("/trades/new"))">Log your first trade</button>
+        <button class="btn btn-primary" @onclick="@(() => Nav.NavigateTo("trades/new"))">Log your first trade</button>
     </div>
 }
 else
@@ -46,7 +46,7 @@ else
     <div class="trade-list">
         @foreach (var trade in _trades.OrderByDescending(t => t.OpenedAt))
         {
-            <div class="trade-card" @onclick="@(() => Nav.NavigateTo($"/trades/{trade.Id}"))">
+            <div class="trade-card" @onclick="@(() => Nav.NavigateTo($"trades/{trade.Id}"))">
                 <div class="trade-row">
                     <div class="trade-ticker">@trade.Ticker</div>
                     <div class="trade-pl @(trade.ProfitLossPercent >= 0 ? "positive" : "negative")">

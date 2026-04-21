@@ -8,7 +8,7 @@
 <PageTitle>@(Id is null ? "New trade" : $"Edit {_trade.Ticker}")</PageTitle>
 
 <div class="edit-header">
-    <button class="btn btn-link" @onclick="@(() => Nav.NavigateTo("/trades"))">← Back</button>
+    <button class="btn btn-link" @onclick="@(() => Nav.NavigateTo("trades"))">← Back</button>
     <h2>@(Id is null ? "New trade" : "Edit trade")</h2>
 </div>
 
@@ -88,7 +88,7 @@
             var existing = await Repository.GetByIdAsync(id);
             if (existing is null)
             {
-                Nav.NavigateTo("/trades");
+                Nav.NavigateTo("trades");
                 return;
             }
             _trade = existing;
@@ -109,7 +109,7 @@
             else
                 await Repository.UpdateAsync(_trade);
 
-            Nav.NavigateTo("/trades");
+            Nav.NavigateTo("trades");
         }
         finally
         {
@@ -125,7 +125,7 @@
         try
         {
             await Repository.DeleteAsync(_trade.Id);
-            Nav.NavigateTo("/trades");
+            Nav.NavigateTo("trades");
         }
         finally
         {
