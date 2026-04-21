@@ -1,0 +1,96 @@
+@page "/"
+
+<PageTitle>Life Tracker</PageTitle>
+
+<div class="home-hero">
+    <h1>Life Tracker</h1>
+    <p class="lead">Personal habit tracker — started with Trade Journal.</p>
+
+    <div class="module-grid">
+        <a href="/trades" class="module-card">
+            <div class="module-icon">📈</div>
+            <div class="module-title">Trade Journal</div>
+            <div class="module-desc">Log trades, track P&L, win rate, patterns</div>
+        </a>
+        <div class="module-card disabled">
+            <div class="module-icon">🍽️</div>
+            <div class="module-title">Food</div>
+            <div class="module-desc">Coming soon</div>
+        </div>
+        <div class="module-card disabled">
+            <div class="module-icon">💪</div>
+            <div class="module-title">Workout</div>
+            <div class="module-desc">Coming soon</div>
+        </div>
+        <div class="module-card disabled">
+            <div class="module-icon">😴</div>
+            <div class="module-title">Sleep</div>
+            <div class="module-desc">Coming soon</div>
+        </div>
+        <div class="module-card disabled">
+            <div class="module-icon">📓</div>
+            <div class="module-title">Journal</div>
+            <div class="module-desc">Coming soon</div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .home-hero {
+        padding: 1.5rem;
+        max-width: 960px;
+        margin: 0 auto;
+    }
+
+    .home-hero h1 {
+        font-size: 2.25rem;
+        margin-bottom: 0.25rem;
+    }
+
+    .lead {
+        color: #8a8a99;
+        margin-bottom: 2rem;
+    }
+
+    .module-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1rem;
+    }
+
+    .module-card {
+        display: block;
+        padding: 1.25rem;
+        border-radius: 12px;
+        background: #1f2328;
+        color: #f0f0f5;
+        text-decoration: none;
+        transition: transform .15s ease, background .15s ease;
+    }
+
+    .module-card:hover:not(.disabled) {
+        background: #2a2f36;
+        transform: translateY(-2px);
+    }
+
+    .module-card.disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+    }
+
+    .module-icon {
+        font-size: 2rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .module-title {
+        font-weight: 600;
+        font-size: 1.1rem;
+        margin-bottom: 0.25rem;
+    }
+
+    .module-desc {
+        font-size: 0.875rem;
+        color: #a0a0b0;
+    }
+</style>

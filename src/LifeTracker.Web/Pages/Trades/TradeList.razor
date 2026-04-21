@@ -1,0 +1,182 @@
+@page "/trades"
+@using LifeTracker.Core.Interfaces
+@using LifeTracker.Core.Models
+@inject ITradeRepository Repository
+@inject NavigationManager Nav
+
+<PageTitle>Trades</PageTitle>
+
+<div class="trades-header">
+    <h1>Trades</h1>
+    <button class="btn btn-primary" @onclick="@(() => Nav.NavigateTo("/trades/new"))">+ New trade</button>
+</div>
+
+@if (_trades is null)
+{
+    <p class="muted">Loading…</p>
+}
+else if (_trades.Count == 0)
+{
+    <div class="empty-state">
+        <p>No trades logged yet.</p>
+        <button class="btn btn-primary" @onclick="@(() => Nav.NavigateTo("/trades/new"))">Log your first trade</button>
+    </div>
+}
+else
+{
+    <div class="stats-row">
+        <div class="stat">
+            <div class="stat-label">Total</div>
+            <div class="stat-value">@_trades.Count</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">Wins</div>
+            <div class="stat-value positive">@_trades.Count(t => t.ProfitLossPercent > 0)</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">Losses</div>
+            <div class="stat-value negative">@_trades.Count(t => t.ProfitLossPercent < 0)</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">Win rate</div>
+            <div class="stat-value">@WinRate.ToString("0.0")%</div>
+        </div>
+    </div>
+
+    <div class="trade-list">
+        @foreach (var trade in _trades.OrderByDescending(t => t.OpenedAt))
+        {
+            <div class="trade-card" @onclick="@(() => Nav.NavigateTo($"/trades/{trade.Id}"))">
+                <div class="trade-row">
+                    <div class="trade-ticker">@trade.Ticker</div>
+                    <div class="trade-pl @(trade.ProfitLossPercent >= 0 ? "positive" : "negative")">
+                        @(trade.ProfitLossPercent >= 0 ? "+" : "")@trade.ProfitLossPercent.ToString("0.00")%
+                    </div>
+                </div>
+                <div class="trade-row trade-meta">
+                    <div>
+                        <span class="badge @(trade.Direction == Direction.Long ? "badge-long" : "badge-short")">
+                            @trade.Direction
+                        </span>
+                        <span class="muted">@trade.OpenedAt.ToString("dd.MM.yyyy HH:mm")</span>
+                    </div>
+                    <div class="muted">@trade.AmountInvested.ToString("C")</div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private List<Trade>? _trades;
+
+    private double WinRate =>
+        _trades is { Count: > 0 }
+            ? 100.0 * _trades.Count(t => t.ProfitLossPercent > 0) / _trades.Count
+            : 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var all = await Repository.GetAllAsync();
+        _trades = all.ToList();
+    }
+}
+
+<style>
+    .trades-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+    }
+
+    .stats-row {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0.75rem;
+        margin-bottom: 1rem;
+    }
+
+    .stat {
+        background: #1f2328;
+        border-radius: 10px;
+        padding: 0.75rem;
+    }
+
+    .stat-label {
+        font-size: 0.75rem;
+        color: #a0a0b0;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .stat-value {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: #f0f0f5;
+    }
+
+    .trade-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .trade-card {
+        background: #1f2328;
+        border-radius: 10px;
+        padding: 0.9rem 1rem;
+        cursor: pointer;
+        transition: background .15s ease;
+    }
+
+    .trade-card:hover { background: #2a2f36; }
+
+    .trade-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .trade-ticker {
+        font-weight: 600;
+        font-size: 1.1rem;
+        color: #f0f0f5;
+    }
+
+    .trade-pl {
+        font-weight: 600;
+        font-size: 1.1rem;
+    }
+
+    .trade-meta {
+        margin-top: 0.3rem;
+        font-size: 0.85rem;
+    }
+
+    .muted { color: #8a8a99; }
+    .positive { color: #4ade80; }
+    .negative { color: #f87171; }
+
+    .badge {
+        display: inline-block;
+        padding: 0.15rem 0.5rem;
+        border-radius: 6px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        margin-right: 0.5rem;
+    }
+
+    .badge-long { background: #14532d; color: #4ade80; }
+    .badge-short { background: #7f1d1d; color: #f87171; }
+
+    .empty-state {
+        text-align: center;
+        padding: 3rem 1rem;
+        color: #8a8a99;
+    }
+
+    @@media (max-width: 600px) {
+        .stats-row { grid-template-columns: repeat(2, 1fr); }
+    }
+</style>

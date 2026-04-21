@@ -1,0 +1,26 @@
+{
+  "name": "Life Tracker",
+  "short_name": "LifeTracker",
+  "description": "Personal habit tracker — trades, food, workout, sleep, journal.",
+  "id": "./",
+  "start_url": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1f2328",
+  "theme_color": "#1f2328",
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    }
+  ]
+}

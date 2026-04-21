@@ -1,0 +1,265 @@
+@page "/trades/new"
+@page "/trades/{Id:int}"
+@using LifeTracker.Core.Interfaces
+@using LifeTracker.Core.Models
+@inject ITradeRepository Repository
+@inject NavigationManager Nav
+
+<PageTitle>@(Id is null ? "New trade" : $"Edit {_trade.Ticker}")</PageTitle>
+
+<div class="edit-header">
+    <button class="btn btn-link" @onclick="@(() => Nav.NavigateTo("/trades"))">← Back</button>
+    <h2>@(Id is null ? "New trade" : "Edit trade")</h2>
+</div>
+
+<EditForm Model="_trade" OnValidSubmit="SaveAsync" class="trade-form">
+    <DataAnnotationsValidator />
+
+    <div class="form-row">
+        <label>Ticker</label>
+        <InputText class="form-control" @bind-Value="_trade.Ticker" placeholder="AAPL, BTCUSD, …" />
+    </div>
+
+    <div class="form-row">
+        <label>Direction</label>
+        <div class="direction-toggle">
+            <button type="button" class="direction-btn @(_trade.Direction == Direction.Long ? "active-long" : "")"
+                    @onclick="@(() => _trade.Direction = Direction.Long)">Long</button>
+            <button type="button" class="direction-btn @(_trade.Direction == Direction.Short ? "active-short" : "")"
+                    @onclick="@(() => _trade.Direction = Direction.Short)">Short</button>
+        </div>
+    </div>
+
+    <div class="form-grid">
+        <div class="form-row">
+            <label>Amount invested</label>
+            <InputNumber class="form-control" @bind-Value="_trade.AmountInvested" step="0.01" />
+        </div>
+        <div class="form-row">
+            <label>Open price</label>
+            <InputNumber class="form-control" @bind-Value="_trade.OpenPrice" step="0.0001" />
+        </div>
+        <div class="form-row">
+            <label>Close price</label>
+            <InputNumber class="form-control" @bind-Value="_trade.ClosePrice" step="0.0001" />
+        </div>
+        <div class="form-row">
+            <label>Opened at</label>
+            <InputDate Type="InputDateType.DateTimeLocal" class="form-control" @bind-Value="_trade.OpenedAt" />
+        </div>
+    </div>
+
+    <div class="form-row">
+        <label>Notes</label>
+        <InputTextArea class="form-control" rows="4" @bind-Value="_trade.Notes"
+                       placeholder="Why did you take this trade?" />
+    </div>
+
+    @if (_trade.OpenPrice > 0 && _trade.ClosePrice > 0)
+    {
+        <div class="pl-preview @(_trade.ProfitLossPercent >= 0 ? "positive" : "negative")">
+            P/L: @(_trade.ProfitLossPercent >= 0 ? "+" : "")@_trade.ProfitLossPercent.ToString("0.00")%
+        </div>
+    }
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary" disabled="@_isSaving">
+            @(_isSaving ? "Saving…" : "Save")
+        </button>
+        @if (Id is not null)
+        {
+            <button type="button" class="btn btn-danger" @onclick="DeleteAsync" disabled="@_isSaving">
+                Delete
+            </button>
+        }
+    </div>
+</EditForm>
+
+@code {
+    [Parameter] public int? Id { get; set; }
+
+    private Trade _trade = new();
+    private bool _isSaving;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Id is int id)
+        {
+            var existing = await Repository.GetByIdAsync(id);
+            if (existing is null)
+            {
+                Nav.NavigateTo("/trades");
+                return;
+            }
+            _trade = existing;
+        }
+        else
+        {
+            _trade = new Trade { OpenedAt = DateTime.Now };
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _isSaving = true;
+        try
+        {
+            if (_trade.Id == 0)
+                await Repository.AddAsync(_trade);
+            else
+                await Repository.UpdateAsync(_trade);
+
+            Nav.NavigateTo("/trades");
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_trade.Id == 0) return;
+
+        _isSaving = true;
+        try
+        {
+            await Repository.DeleteAsync(_trade.Id);
+            Nav.NavigateTo("/trades");
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+}
+
+<style>
+    .edit-header {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+    }
+
+    .edit-header h2 { margin: 0; }
+
+    .trade-form {
+        max-width: 640px;
+    }
+
+    .form-row {
+        margin-bottom: 1rem;
+    }
+
+    .form-row label {
+        display: block;
+        font-size: 0.85rem;
+        color: #a0a0b0;
+        margin-bottom: 0.3rem;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .form-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.75rem;
+    }
+
+    .form-control {
+        background: #1f2328;
+        border: 1px solid #2a2f36;
+        color: #f0f0f5;
+        border-radius: 8px;
+        padding: 0.6rem 0.75rem;
+        width: 100%;
+    }
+
+    .form-control:focus {
+        border-color: #4ade80;
+        outline: none;
+    }
+
+    .direction-toggle {
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    .direction-btn {
+        flex: 1;
+        padding: 0.6rem;
+        background: #1f2328;
+        border: 1px solid #2a2f36;
+        color: #a0a0b0;
+        border-radius: 8px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+
+    .direction-btn.active-long {
+        background: #14532d;
+        color: #4ade80;
+        border-color: #4ade80;
+    }
+
+    .direction-btn.active-short {
+        background: #7f1d1d;
+        color: #f87171;
+        border-color: #f87171;
+    }
+
+    .pl-preview {
+        font-size: 1.25rem;
+        font-weight: 600;
+        text-align: right;
+        padding: 0.75rem;
+        background: #1f2328;
+        border-radius: 8px;
+        margin-bottom: 1rem;
+    }
+
+    .positive { color: #4ade80; }
+    .negative { color: #f87171; }
+
+    .form-actions {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 1.5rem;
+    }
+
+    .btn-primary {
+        flex: 1;
+        padding: 0.75rem;
+        background: #4ade80;
+        border: none;
+        color: #052e16;
+        font-weight: 600;
+        border-radius: 8px;
+        cursor: pointer;
+    }
+
+    .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    .btn-danger {
+        padding: 0.75rem 1.25rem;
+        background: transparent;
+        border: 1px solid #f87171;
+        color: #f87171;
+        border-radius: 8px;
+        cursor: pointer;
+        font-weight: 600;
+    }
+
+    .btn-link {
+        background: transparent;
+        border: none;
+        color: #a0a0b0;
+        cursor: pointer;
+        padding: 0.5rem;
+    }
+
+    @@media (max-width: 600px) {
+        .form-grid { grid-template-columns: 1fr; }
+    }
+</style>
