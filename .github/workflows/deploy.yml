@@ -1,0 +1,54 @@
+name: Deploy Blazor to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          include-prerelease: true
+
+      - name: Install WASM tools workload
+        run: dotnet workload install wasm-tools
+
+      - name: Publish Blazor app
+        run: dotnet publish src/LifeTracker.Web/LifeTracker.Web.csproj -c Release -o publish
+
+      - name: Rewrite base href for GitHub Pages subpath
+        run: |
+          sed -i 's|<base href="/" />|<base href="/LifeTracker/" />|g' publish/wwwroot/index.html
+
+      - name: Create .nojekyll (GitHub Pages treats _framework/ as an asset dir)
+        run: touch publish/wwwroot/.nojekyll
+
+      - name: Add 404 fallback for SPA routing
+        run: cp publish/wwwroot/index.html publish/wwwroot/404.html
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: publish/wwwroot
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
