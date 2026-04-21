@@ -81,7 +81,9 @@ Swapping providers is a DI one-liner: write `ClaudeAiService : IAiService`, regi
 
 ### Why Gemini first, not Claude
 
-Gemini's free tier is real: 15 req/min and 1500 req/day of `gemini-1.5-flash` with no credit card. For a personal trade journal that's essentially unlimited. Claude API has no free tier — once the user wants the extra quality we wire in `ClaudeAiService` alongside and let them pick in Settings.
+Gemini's free tier is real: 15 req/min and 1500 req/day on the `gemini-flash-latest` alias with no credit card. For a personal trade journal that's essentially unlimited. Claude API has no free tier — once the user wants the extra quality we wire in `ClaudeAiService` alongside and let them pick in Settings.
+
+We intentionally default to `gemini-flash-latest` instead of pinning to `gemini-1.5-flash` or similar. Google retires concrete flash versions roughly every 6-9 months and newly issued API keys stop working against them (404 / `UNAVAILABLE` errors). The alias keeps the app working across those rotations without a code change.
 
 ## Future modules (designed for, not built)
 

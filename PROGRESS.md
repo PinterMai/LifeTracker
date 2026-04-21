@@ -22,16 +22,24 @@
 
 ### Why Gemini
 
-Claude API has no free tier; Gemini's free tier (15 req/min, 1500 req/day of `gemini-1.5-flash`) is enough for personal use. `IAiService` is abstract so adding `ClaudeAiService` later is a one-line DI swap.
+Claude API has no free tier; Gemini's free tier (15 req/min, 1500 req/day on `gemini-flash-latest`) is enough for personal use. `IAiService` is abstract so adding `ClaudeAiService` later is a one-line DI swap.
+
+> **Model note:** we default to the `gemini-flash-latest` alias rather than a pinned version like `gemini-1.5-flash`. Google retires concrete flash versions and a fresh API key ends up returning 404/503 against them. The `-latest` alias always resolves to the current free-tier flash model.
 
 ### Verified
 
 - `dotnet build` — 0 errors, 0 warnings.
 - `dotnet test` — 18/18 passing (12 Trade + 6 prompt builder).
+- **Live smoke test passed.** User pasted their own Gemini key in Settings → Test connection returned OK → clicked Analyze on a saved trade → got real feedback referencing the trade's ticker, position size and note absence. Token counts displayed (e.g. `gemini-flash-latest · 256 in / 206 out`).
+
+### Post-deploy fixes
+
+- Bumped default model `gemini-1.5-flash` → `gemini-flash-latest`. The pinned version started returning 404/503 on freshly issued keys because Google rotated it.
+- Improved AI-feedback card contrast: explicit `color: #e5e7eb` on body, bright cyan `.analysis-header strong`, slightly larger line-height. Previously the text rendered nearly invisible dark-on-dark.
 
 ### Not yet done
 
-- Smoke test AI on live deploy (user to paste Gemini key + click Analyze).
+- Ticker autocomplete (user asked for a built-in symbol catalog so typing "app" suggests AAPL).
 - Weekly summary / multi-trade analysis.
 - Phase 3 — X signal ingestion (architecture TBD for pure PWA; likely manual paste + AI parse).
 - Remove legacy `LifeTracker.WPF` once PWA is confirmed stable on device.

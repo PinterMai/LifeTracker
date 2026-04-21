@@ -17,8 +17,13 @@ All notable user-facing changes go here. Dates are ISO 8601.
 ### Changed
 
 - Pivoted from WPF desktop app to Blazor WASM PWA.
+- Default Gemini model is now `gemini-flash-latest` instead of the pinned
+  `gemini-1.5-flash`. Google retires concrete flash versions and freshly
+  issued API keys stop working against them.
 
 ### Fixed
 
 - Navigation inside the deployed `/LifeTracker/` subpath no longer 404s —
   links are now relative so they resolve against `<base href>`.
+- AI feedback card is now readable — previously the text rendered
+  near-invisible dark-on-dark because no explicit text color was set.
