@@ -1,0 +1,217 @@
+@using LifeTracker.Core.Interfaces
+@using LifeTracker.Core.Models
+@inject ITickerCatalog Catalog
+@implements IAsyncDisposable
+
+@* Custom autocomplete: a plain <input> that opens a dropdown with ranked
+   suggestions from ITickerCatalog. Chosen over <datalist> because
+   browsers render datalist differently on every platform (especially
+   mobile) and we want total control over keyboard/touch behavior. *@
+
+<div class="tk-wrap" @onfocusout="OnFocusOut">
+    <input type="text"
+           class="form-control"
+           value="@Value"
+           placeholder="@Placeholder"
+           autocomplete="off"
+           spellcheck="false"
+           @oninput="OnInput"
+           @onkeydown="OnKeyDown"
+           @onfocus="OnFocus" />
+
+    @if (_open && _suggestions.Count > 0)
+    {
+        <ul class="tk-list" role="listbox">
+            @for (var i = 0; i < _suggestions.Count; i++)
+            {
+                var idx = i;
+                var s = _suggestions[i];
+                <li class="tk-item @(idx == _highlight ? "active" : "")"
+                    role="option"
+                    @onmousedown:preventDefault
+                    @onmousedown="@(() => Pick(s))">
+                    <span class="tk-sym">@s.Symbol</span>
+                    <span class="tk-name">@s.Name</span>
+                    <span class="tk-ex">@s.Exchange</span>
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public string Placeholder { get; set; } = "";
+
+    private readonly List<TickerSymbol> _suggestions = new();
+    private bool _open;
+    private int _highlight = -1;
+
+    // Debounce guard — every keystroke increments the token; only the
+    // latest lookup's results win the race back to the UI.
+    private int _queryToken;
+    private CancellationTokenSource? _cts;
+
+    private async Task OnInput(ChangeEventArgs e)
+    {
+        var text = e.Value?.ToString();
+        Value = text;
+        await ValueChanged.InvokeAsync(text);
+        await RunSearch(text);
+    }
+
+    private async Task OnFocus()
+    {
+        // Reopen with whatever's already typed so the user can re-pick
+        // after tabbing away.
+        if (!string.IsNullOrWhiteSpace(Value))
+        {
+            await RunSearch(Value);
+        }
+    }
+
+    private void OnFocusOut(FocusEventArgs e)
+    {
+        // Close on blur, but defer a tick so an outgoing mousedown on a
+        // suggestion can land first. @onmousedown:preventDefault already
+        // keeps focus, so this is mostly belt-and-suspenders.
+        _open = false;
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (!_open || _suggestions.Count == 0)
+        {
+            return;
+        }
+
+        switch (e.Key)
+        {
+            case "ArrowDown":
+                _highlight = Math.Min(_highlight + 1, _suggestions.Count - 1);
+                break;
+            case "ArrowUp":
+                _highlight = Math.Max(_highlight - 1, 0);
+                break;
+            case "Enter":
+                if (_highlight >= 0 && _highlight < _suggestions.Count)
+                {
+                    await Pick(_suggestions[_highlight]);
+                }
+                break;
+            case "Escape":
+                _open = false;
+                break;
+        }
+    }
+
+    private async Task Pick(TickerSymbol s)
+    {
+        Value = s.Symbol;
+        _open = false;
+        _highlight = -1;
+        await ValueChanged.InvokeAsync(s.Symbol);
+    }
+
+    private async Task RunSearch(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            _suggestions.Clear();
+            _open = false;
+            _highlight = -1;
+            return;
+        }
+
+        // Cancel previous in-flight lookup and start fresh.
+        _cts?.Cancel();
+        _cts = new CancellationTokenSource();
+        var token = ++_queryToken;
+        var ct = _cts.Token;
+
+        try
+        {
+            // Cheap in-process call today, but ITickerCatalog is async
+            // precisely so a remote implementation can slot in later.
+            var hits = await Catalog.SearchAsync(text, limit: 8, cancellationToken: ct);
+
+            // Lost the race — discard stale results.
+            if (token != _queryToken) return;
+
+            _suggestions.Clear();
+            _suggestions.AddRange(hits);
+            _open = _suggestions.Count > 0;
+            _highlight = _suggestions.Count > 0 ? 0 : -1;
+        }
+        catch (OperationCanceledException)
+        {
+            // User kept typing; the newer lookup handles it.
+        }
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        _cts?.Cancel();
+        _cts?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}
+
+<style>
+    .tk-wrap {
+        position: relative;
+    }
+
+    .tk-list {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        margin: 0.25rem 0 0;
+        padding: 0.25rem 0;
+        list-style: none;
+        background: #1f2328;
+        border: 1px solid #2a2f36;
+        border-radius: 8px;
+        max-height: 16rem;
+        overflow-y: auto;
+        z-index: 20;
+        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4);
+    }
+
+    .tk-item {
+        display: grid;
+        grid-template-columns: 5rem 1fr auto;
+        gap: 0.5rem;
+        padding: 0.45rem 0.75rem;
+        cursor: pointer;
+        color: #e5e7eb;
+        align-items: baseline;
+    }
+
+    .tk-item:hover, .tk-item.active {
+        background: #2a2f36;
+    }
+
+    .tk-sym {
+        font-weight: 600;
+        color: #93c5fd;
+        letter-spacing: 0.3px;
+    }
+
+    .tk-name {
+        color: #e5e7eb;
+        font-size: 0.92rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .tk-ex {
+        color: #8a8a99;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+    }
+</style>

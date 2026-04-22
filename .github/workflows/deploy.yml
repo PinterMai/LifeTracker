@@ -31,6 +31,15 @@ jobs:
       - name: Install WASM tools workload
         run: dotnet workload install wasm-tools
 
+      # Rebuilds wwwroot/data/tickers.json from NASDAQ Trader + CoinGecko so
+      # the deployed autocomplete is never more than a few minutes stale.
+      # Uses pwsh (pre-installed on GitHub-hosted runners); non-fatal — if
+      # the fetch fails we fall back to whatever's already committed.
+      - name: Refresh ticker catalog
+        shell: pwsh
+        continue-on-error: true
+        run: ./scripts/update-tickers.ps1
+
       - name: Publish Blazor app
         run: dotnet publish src/LifeTracker.Web/LifeTracker.Web.csproj -c Release -o publish
 

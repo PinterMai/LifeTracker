@@ -37,6 +37,11 @@ builder.Services.AddScoped<ITradeRepository>(sp =>
 builder.Services.AddScoped<ISettingsService, BrowserSettings>();
 builder.Services.AddScoped<IAiService, GeminiAiService>();
 
+// --- Autocomplete ---
+// StaticTickerCatalog pulls wwwroot/data/tickers.json on first search and
+// keeps it cached for the session. Scoped so it shares the app's HttpClient.
+builder.Services.AddScoped<ITickerCatalog, StaticTickerCatalog>();
+
 var host = builder.Build();
 
 // Hydrate SQLite file from IndexedDB (if any) and ensure schema is created.
