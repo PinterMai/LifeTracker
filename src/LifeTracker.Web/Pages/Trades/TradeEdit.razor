@@ -1,5 +1,6 @@
 @page "/trades/new"
 @page "/trades/{Id:int}"
+@using System.Web
 @using LifeTracker.Core.Interfaces
 @using LifeTracker.Core.Models
 @inject ITradeRepository Repository
@@ -136,6 +137,15 @@
         else
         {
             _trade = new Trade { OpenedAt = DateTime.Now };
+
+            // Allow deep-linking from the Signals page via ?ticker=AAPL so
+            // one click on a signal card starts a half-filled new trade.
+            var uri = new Uri(Nav.Uri);
+            var ticker = HttpUtility.ParseQueryString(uri.Query).Get("ticker");
+            if (!string.IsNullOrWhiteSpace(ticker))
+            {
+                _trade.Ticker = ticker.Trim().ToUpperInvariant();
+            }
         }
     }
 

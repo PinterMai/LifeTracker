@@ -1,0 +1,285 @@
+@page "/signals"
+@using LifeTracker.Core.Interfaces
+@using LifeTracker.Core.Models
+@using LifeTracker.Web.Services
+@inject IAiService Ai
+@inject ISettingsService SettingsSvc
+@inject StaticTickerCatalog Catalog
+@inject NavigationManager Nav
+
+<PageTitle>Signals</PageTitle>
+
+<div class="signals-page">
+    <div class="page-header">
+        <h1>Signals</h1>
+        <p class="muted">
+            Gemini + Google Search scan of what your trusted X accounts said about tickers
+            in the last week. Coverage is whatever Google has indexed — not a real-time
+            feed.
+        </p>
+    </div>
+
+    @if (_handles is null)
+    {
+        <div class="status info">Loading…</div>
+    }
+    else if (_handles.Count == 0)
+    {
+        <div class="status info">
+            No handles configured. Open <a href="settings">Settings</a> and paste your
+            trusted X handles first.
+        </div>
+    }
+    else
+    {
+        <div class="handles-summary">
+            <strong>@_handles.Count handles:</strong>
+            <span class="muted">@string.Join(", ", _handles.Select(h => "@" + h))</span>
+        </div>
+
+        <div class="form-actions">
+            <button class="btn btn-primary" @onclick="ScanAsync" disabled="@_isScanning">
+                @(_isScanning ? "Scanning…" : "Scan now")
+            </button>
+            @if (_lastScan is not null)
+            {
+                <span class="muted">Last scan: @_lastScan.Value.ToLocalTime().ToString("HH:mm:ss")</span>
+            }
+        </div>
+
+        @if (_error is not null)
+        {
+            <div class="status error">@_error</div>
+        }
+
+        @if (_signals is not null)
+        {
+            @if (_signals.Count == 0)
+            {
+                <div class="status info">
+                    No ticker mentions found. Either your handles went quiet this week or
+                    Google hasn't indexed their recent posts yet.
+                </div>
+            }
+            else
+            {
+                <div class="signal-grid">
+                    @foreach (var s in _signals)
+                    {
+                        <div class="signal-card sentiment-@s.Sentiment.ToString().ToLower()">
+                            <div class="signal-head">
+                                <span class="ticker">@s.Ticker</span>
+                                <span class="sentiment">@s.Sentiment</span>
+                            </div>
+                            <div class="handle">@@@s.Handle</div>
+                            <blockquote class="quote">@s.Quote</blockquote>
+                            <div class="signal-actions">
+                                @if (s.SourceUrl is { Length: > 0 } url)
+                                {
+                                    <a class="source" href="@url" target="_blank" rel="noopener">view on X</a>
+                                }
+                                <button class="btn btn-link" @onclick="() => OpenTradeAsync(s)">
+                                    Start trade →
+                                </button>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        }
+    }
+</div>
+
+@code {
+    private IReadOnlyList<string>? _handles;
+    private IReadOnlyList<SignalCandidate>? _signals;
+    private DateTime? _lastScan;
+    private bool _isScanning;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var raw = await SettingsSvc.GetAsync(SettingsKeys.TrustedXHandles) ?? string.Empty;
+        _handles = raw
+            .Split(new[] { ',', ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(h => h.Trim().TrimStart('@'))
+            .Where(h => h.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private async Task ScanAsync()
+    {
+        if (_handles is null || _handles.Count == 0) return;
+
+        _isScanning = true;
+        _error = null;
+        _signals = null;
+        try
+        {
+            var results = await Ai.ScanSignalsAsync(_handles);
+            _signals = results;
+            _lastScan = DateTime.UtcNow;
+
+            // Feed every discovered ticker into the catalog so the
+            // autocomplete on TradeEdit picks it up without a reload.
+            foreach (var s in results)
+            {
+                await Catalog.AddDiscoveredAsync(
+                    new TickerSymbol(s.Ticker, $"{s.Ticker} (from @{s.Handle})", "X Scan"));
+            }
+        }
+        catch (InvalidOperationException ex)
+        {
+            _error = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            _error = $"Scan failed: {ex.Message}";
+        }
+        finally
+        {
+            _isScanning = false;
+        }
+    }
+
+    private Task OpenTradeAsync(SignalCandidate s)
+    {
+        // Deep-link into the new-trade form with the ticker prefilled.
+        // TradeEdit reads the query string on its own.
+        Nav.NavigateTo($"trades/new?ticker={Uri.EscapeDataString(s.Ticker)}");
+        return Task.CompletedTask;
+    }
+}
+
+<style>
+    .signals-page {
+        padding: 1.5rem;
+        max-width: 900px;
+        margin: 0 auto;
+    }
+
+    .page-header h1 { margin-bottom: 0.25rem; }
+    .muted { color: #a0a0b0; }
+
+    .handles-summary {
+        background: #1f2328;
+        padding: 0.75rem 1rem;
+        border-radius: 8px;
+        margin-bottom: 1rem;
+        font-size: 0.9rem;
+    }
+
+    .form-actions {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        margin-bottom: 1rem;
+    }
+
+    .btn-primary {
+        padding: 0.6rem 1.25rem;
+        background: #4ade80;
+        border: none;
+        color: #052e16;
+        font-weight: 600;
+        border-radius: 8px;
+        cursor: pointer;
+    }
+
+    .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    .btn-link {
+        background: transparent;
+        border: none;
+        color: #93c5fd;
+        cursor: pointer;
+        padding: 0;
+        font-size: 0.85rem;
+    }
+
+    .btn-link:hover { text-decoration: underline; }
+
+    .status {
+        padding: 0.75rem 1rem;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        margin-bottom: 1rem;
+    }
+
+    .status.info { background: #1e3a5f; color: #93c5fd; }
+    .status.error { background: #7f1d1d; color: #f87171; }
+
+    .signal-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+        gap: 0.75rem;
+    }
+
+    .signal-card {
+        background: #1f2328;
+        border-radius: 10px;
+        padding: 0.9rem 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        border-left: 3px solid #2a2f36;
+    }
+
+    .signal-card.sentiment-bullish { border-left-color: #4ade80; }
+    .signal-card.sentiment-bearish { border-left-color: #f87171; }
+    .signal-card.sentiment-neutral { border-left-color: #93c5fd; }
+
+    .signal-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+    }
+
+    .ticker {
+        font-size: 1.2rem;
+        font-weight: 700;
+        letter-spacing: 0.4px;
+        color: #f0f0f5;
+    }
+
+    .sentiment {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: #a0a0b0;
+    }
+
+    .signal-card.sentiment-bullish .sentiment { color: #4ade80; }
+    .signal-card.sentiment-bearish .sentiment { color: #f87171; }
+
+    .handle {
+        color: #93c5fd;
+        font-size: 0.85rem;
+    }
+
+    .quote {
+        margin: 0;
+        color: #e5e7eb;
+        font-size: 0.9rem;
+        line-height: 1.4;
+        font-style: italic;
+        border: none;
+        padding: 0;
+    }
+
+    .signal-actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 0.25rem;
+    }
+
+    .source {
+        color: #8a8a99;
+        font-size: 0.8rem;
+        text-decoration: none;
+    }
+
+    .source:hover { color: #93c5fd; text-decoration: underline; }
+</style>

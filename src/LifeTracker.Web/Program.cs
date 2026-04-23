@@ -39,8 +39,11 @@ builder.Services.AddScoped<IAiService, GeminiAiService>();
 
 // --- Autocomplete ---
 // StaticTickerCatalog pulls wwwroot/data/tickers.json on first search and
-// keeps it cached for the session. Scoped so it shares the app's HttpClient.
-builder.Services.AddScoped<ITickerCatalog, StaticTickerCatalog>();
+// keeps it cached for the session. Also merges tickers the Signals scan
+// discovered. We register it by concrete type so the Signals page can
+// call AddDiscoveredAsync, and alias ITickerCatalog to the same instance.
+builder.Services.AddScoped<StaticTickerCatalog>();
+builder.Services.AddScoped<ITickerCatalog>(sp => sp.GetRequiredService<StaticTickerCatalog>());
 
 var host = builder.Build();
 

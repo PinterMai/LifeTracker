@@ -37,4 +37,10 @@ public static class SettingsKeys
     // trusts for trade signal. Fed into the Gemini grounded prompt so
     // it searches what these accounts recently said about the ticker.
     public const string TrustedXHandles = "trusted_x_handles";
+
+    // JSON array of { symbol, name, exchange } the Signals scan has
+    // discovered. Merged into the static ticker catalog so a ticker
+    // mentioned on X shows up in autocomplete even if it wasn't in
+    // the pre-built NASDAQ+other-listed dataset.
+    public const string DiscoveredTickers = "discovered_tickers";
 }

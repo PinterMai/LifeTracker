@@ -72,9 +72,13 @@ function Parse-NasdaqListed($text, $listName) {
         # Test issues never trade — drop them.
         if ($testIdx -ge 0 -and $cols[$testIdx] -eq 'Y') { continue }
 
-        # Symbols containing . / $ + = or whitespace are derivative-ish
+        # Symbols containing $ + = / or whitespace are derivative-ish
         # listings (warrants, units, preferreds, when-issued). Filter hard.
-        if ($sym -match '[\.\$\+\=\s/]') { continue }
+        # Dots used to be in this blacklist but that wiped real class-share
+        # tickers (BRK.A, BRK.B, BF.A, BF.B, RDS.A, JW.A, STZ.B, …). The
+        # name-based Warrant/Unit/Preferred filter below catches the real
+        # junk that happens to use dots (e.g. `T.W` = "AT&T Warrant").
+        if ($sym -match '[\$\+\=\s/]') { continue }
 
         $name = if ($nameIdx -ge 0 -and $cols.Count -gt $nameIdx) { $cols[$nameIdx] } else { '' }
         if ($name -match $skipNameRx) { continue }
