@@ -1,7 +1,9 @@
 @page "/settings"
 @using LifeTracker.Core.Interfaces
+@using LifeTracker.Web.Services
 @inject ISettingsService SettingsSvc
 @inject IAiService Ai
+@inject BrowserDbPersistence Persistence
 
 <PageTitle>Settings</PageTitle>
 
@@ -56,6 +58,74 @@
             <div class="status @_statusKind">@_status</div>
         }
     </section>
+
+    <section class="card">
+        <h2>Trusted X handles</h2>
+        <p class="muted">
+            Comma-separated list of X/Twitter handles (without the <code>@@</code>).
+            The AI uses this as a whitelist when researching your ticker — it'll
+            look at what these accounts recently posted instead of random noise.
+        </p>
+        <div class="form-row">
+            <label>Handles</label>
+            <textarea class="form-control" rows="3" @bind="_xHandles"
+                      placeholder="Yeah_Dave, Kaizen_Investor, michaelsikand, …"></textarea>
+            <p class="hint">Up to ~30 handles recommended. Stored in this browser only.</p>
+        </div>
+        <div class="form-actions">
+            <button class="btn btn-primary" @onclick="SaveHandlesAsync" disabled="@_isBusy">Save handles</button>
+        </div>
+        @if (_handlesStatus is not null)
+        {
+            <div class="status @_handlesStatusKind">@_handlesStatus</div>
+        }
+    </section>
+
+    <section class="card">
+        <h2>Storage</h2>
+        <p class="muted">
+            Trades live in your browser's IndexedDB. On mobile, iOS Safari and
+            some Android browsers evict IndexedDB after ~7 days unless the site
+            gets <em>persistent storage</em>. Adding the app to your home screen
+            makes the grant sticky.
+        </p>
+        @if (_storage is not null)
+        {
+            <div class="storage-grid">
+                <div><span class="muted">DB size</span><strong>@FormatBytes(_storage.DbBytes)</strong></div>
+                <div>
+                    <span class="muted">Persistent</span>
+                    @if (_storage.Persisted == true)
+                    {
+                        <strong class="good">granted</strong>
+                    }
+                    else if (_storage.Persisted == false)
+                    {
+                        <strong class="bad">not granted</strong>
+                    }
+                    else
+                    {
+                        <strong class="muted">unknown</strong>
+                    }
+                </div>
+                @if (_storage.UsageBytes is long usage && _storage.QuotaBytes is long quota)
+                {
+                    <div><span class="muted">Quota</span><strong>@FormatBytes(usage) / @FormatBytes(quota)</strong></div>
+                }
+            </div>
+            @if (_storage.DbBytes == 0)
+            {
+                <div class="status error">
+                    No database in IndexedDB. Either you haven't added a trade yet, or the
+                    browser wiped it. Add one, then reload — if it disappears again, add
+                    this app to your home screen and retry.
+                </div>
+            }
+        }
+        <div class="form-actions">
+            <button class="btn btn-secondary" @onclick="RefreshStorageAsync" disabled="@_isBusy">Refresh</button>
+        </div>
+    </section>
 </div>
 
 @code {
@@ -66,10 +136,76 @@
     private string? _status;
     private string _statusKind = "info";
 
+    private string _xHandles = string.Empty;
+    private string? _handlesStatus;
+    private string _handlesStatusKind = "info";
+
+    private BrowserDbPersistence.StorageInfo? _storage;
+
     protected override async Task OnInitializedAsync()
     {
         _apiKey = await SettingsSvc.GetAsync(SettingsKeys.AiApiKey) ?? string.Empty;
         _model = await SettingsSvc.GetAsync(SettingsKeys.AiModel) ?? Services.GeminiAiService.DefaultModel;
+        _xHandles = await SettingsSvc.GetAsync(SettingsKeys.TrustedXHandles) ?? string.Empty;
+        await RefreshStorageAsync();
+    }
+
+    private async Task SaveHandlesAsync()
+    {
+        _isBusy = true;
+        try
+        {
+            // Normalize: strip @, split on comma/whitespace, dedupe case-insensitively,
+            // rejoin as a clean comma-separated list the prompt can consume directly.
+            var cleaned = string.Join(", ",
+                (_xHandles ?? string.Empty)
+                    .Split(new[] { ',', ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(h => h.Trim().TrimStart('@'))
+                    .Where(h => h.Length > 0)
+                    .Distinct(StringComparer.OrdinalIgnoreCase));
+
+            if (string.IsNullOrWhiteSpace(cleaned))
+            {
+                await SettingsSvc.RemoveAsync(SettingsKeys.TrustedXHandles);
+            }
+            else
+            {
+                await SettingsSvc.SetAsync(SettingsKeys.TrustedXHandles, cleaned);
+            }
+            _xHandles = cleaned;
+            _handlesStatus = "Saved.";
+            _handlesStatusKind = "success";
+        }
+        catch (Exception ex)
+        {
+            _handlesStatus = ex.Message;
+            _handlesStatusKind = "error";
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private async Task RefreshStorageAsync()
+    {
+        try
+        {
+            _storage = await Persistence.GetStorageInfoAsync();
+        }
+        catch
+        {
+            _storage = null;
+        }
+    }
+
+    private static string FormatBytes(long? bytes)
+    {
+        if (bytes is null) return "–";
+        var b = bytes.Value;
+        if (b < 1024) return $"{b} B";
+        if (b < 1024 * 1024) return $"{b / 1024.0:0.#} KB";
+        return $"{b / (1024.0 * 1024.0):0.##} MB";
     }
 
     private async Task SaveAsync()
@@ -251,4 +387,24 @@
     .status.success { background: #14532d; color: #4ade80; }
     .status.error { background: #7f1d1d; color: #f87171; }
     .status.info { background: #1e3a5f; color: #93c5fd; }
+
+    .storage-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+        gap: 0.75rem;
+        margin-bottom: 0.75rem;
+    }
+
+    .storage-grid > div {
+        background: #14161a;
+        border-radius: 8px;
+        padding: 0.6rem 0.75rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+
+    .storage-grid .muted { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.4px; }
+    .storage-grid strong.good { color: #4ade80; }
+    .storage-grid strong.bad { color: #f87171; }
 </style>

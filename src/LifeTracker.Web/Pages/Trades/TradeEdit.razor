@@ -91,6 +91,20 @@
             </span>
         </div>
         <p class="analysis-text">@_analysis.Text</p>
+        @if (_analysis.Citations is { Count: > 0 } citations)
+        {
+            <div class="analysis-sources">
+                <strong>Sources</strong>
+                <ol>
+                    @foreach (var c in citations)
+                    {
+                        <li>
+                            <a href="@c.Url" target="_blank" rel="noopener">@c.Title</a>
+                        </li>
+                    }
+                </ol>
+            </div>
+        }
     </div>
 }
 @if (_analysisError is not null)
@@ -362,6 +376,31 @@
         padding: 0.75rem 1rem;
         border-radius: 8px;
     }
+
+    .analysis-sources {
+        margin-top: 0.75rem;
+        padding-top: 0.75rem;
+        border-top: 1px solid #2a2f36;
+        font-size: 0.85rem;
+        color: #a0a0b0;
+    }
+
+    .analysis-sources strong {
+        color: #93c5fd;
+        letter-spacing: 0.3px;
+    }
+
+    .analysis-sources ol {
+        margin: 0.5rem 0 0 1.25rem;
+        padding: 0;
+    }
+
+    .analysis-sources a {
+        color: #93c5fd;
+        text-decoration: none;
+    }
+
+    .analysis-sources a:hover { text-decoration: underline; }
 
     @@media (max-width: 600px) {
         .form-grid { grid-template-columns: 1fr; }

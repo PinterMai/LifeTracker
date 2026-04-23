@@ -38,22 +38,68 @@ public sealed class GeminiAiService : IAiService
         ArgumentNullException.ThrowIfNull(history);
 
         var (apiKey, model) = await GetKeyAndModelAsync(cancellationToken).ConfigureAwait(false);
-        var prompt = TradePromptBuilder.BuildAnalyzePrompt(trade, history);
+        var handles = await GetTrustedHandlesAsync(cancellationToken).ConfigureAwait(false);
+        var prompt = TradePromptBuilder.BuildAnalyzePrompt(trade, history, trustedHandles: handles);
+
+        // google_search = Gemini's built-in grounding tool. Enables live
+        // web lookups and fills response.groundingMetadata.groundingChunks
+        // with source URLs we surface in the UI.
+        var tools = new[] { new GeminiTool(GoogleSearch: new object()) };
 
         var request = new GeminiRequest(
             SystemInstruction: new GeminiContent(new[] { new GeminiPart(TradePromptBuilder.SystemInstruction) }),
-            Contents: new[] { new GeminiContent(new[] { new GeminiPart(prompt) }) });
+            Contents: new[] { new GeminiContent(new[] { new GeminiPart(prompt) }) },
+            Tools: tools);
 
         var response = await PostAsync(apiKey, model, request, cancellationToken).ConfigureAwait(false);
 
-        var text = response?.Candidates?.FirstOrDefault()?.Content?.Parts?.FirstOrDefault()?.Text
-                   ?? "(empty response)";
+        var candidate = response?.Candidates?.FirstOrDefault();
+        // Flash models sometimes return multi-part answers; concatenate all
+        // text parts so we don't silently drop the model's continuation.
+        var text = candidate?.Content?.Parts is { Count: > 0 } parts
+            ? string.Concat(parts.Select(p => p.Text ?? string.Empty)).Trim()
+            : "(empty response)";
+
+        var citations = ExtractCitations(candidate?.GroundingMetadata);
 
         return new AiAnalysis(
-            Text: text.Trim(),
+            Text: string.IsNullOrWhiteSpace(text) ? "(empty response)" : text,
             InputTokens: response?.UsageMetadata?.PromptTokenCount ?? 0,
             OutputTokens: response?.UsageMetadata?.CandidatesTokenCount ?? 0,
-            Model: model);
+            Model: model,
+            Citations: citations);
+    }
+
+    private async Task<IReadOnlyList<string>?> GetTrustedHandlesAsync(CancellationToken ct)
+    {
+        var raw = await _settings.GetAsync(SettingsKeys.TrustedXHandles, ct).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+
+        return raw
+            .Split(new[] { ',', ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(h => h.Trim().TrimStart('@'))
+            .Where(h => h.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<AiCitation>? ExtractCitations(GeminiGroundingMetadata? meta)
+    {
+        if (meta?.GroundingChunks is not { Count: > 0 } chunks) return null;
+
+        var list = new List<AiCitation>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var c in chunks)
+        {
+            var web = c.Web;
+            if (web is null) continue;
+            var url = web.Uri ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(url)) continue;
+            if (!seen.Add(url)) continue;
+            var title = string.IsNullOrWhiteSpace(web.Title) ? url : web.Title!;
+            list.Add(new AiCitation(title, url));
+        }
+        return list.Count == 0 ? null : list;
     }
 
     public async Task<bool> TestConnectionAsync(CancellationToken cancellationToken = default)
@@ -120,7 +166,16 @@ public sealed class GeminiAiService : IAiService
         [property: JsonPropertyName("systemInstruction")]
         GeminiContent? SystemInstruction,
         [property: JsonPropertyName("contents")]
-        IReadOnlyList<GeminiContent> Contents);
+        IReadOnlyList<GeminiContent> Contents,
+        [property: JsonPropertyName("tools")]
+        IReadOnlyList<GeminiTool>? Tools = null);
+
+    // Gemini wire format uses snake_case field names inside tool objects.
+    // google_search = built-in grounding with web search; the value is an
+    // empty object per the v1beta spec.
+    private sealed record GeminiTool(
+        [property: JsonPropertyName("google_search")]
+        object? GoogleSearch);
 
     private sealed record GeminiContent(
         [property: JsonPropertyName("parts")]
@@ -128,7 +183,7 @@ public sealed class GeminiAiService : IAiService
 
     private sealed record GeminiPart(
         [property: JsonPropertyName("text")]
-        string Text);
+        string? Text);
 
     private sealed record GeminiResponse(
         [property: JsonPropertyName("candidates")]
@@ -138,7 +193,23 @@ public sealed class GeminiAiService : IAiService
 
     private sealed record GeminiCandidate(
         [property: JsonPropertyName("content")]
-        GeminiContent? Content);
+        GeminiContent? Content,
+        [property: JsonPropertyName("groundingMetadata")]
+        GeminiGroundingMetadata? GroundingMetadata);
+
+    private sealed record GeminiGroundingMetadata(
+        [property: JsonPropertyName("groundingChunks")]
+        IReadOnlyList<GeminiGroundingChunk>? GroundingChunks);
+
+    private sealed record GeminiGroundingChunk(
+        [property: JsonPropertyName("web")]
+        GeminiWebSource? Web);
+
+    private sealed record GeminiWebSource(
+        [property: JsonPropertyName("uri")]
+        string? Uri,
+        [property: JsonPropertyName("title")]
+        string? Title);
 
     private sealed record GeminiUsage(
         [property: JsonPropertyName("promptTokenCount")]

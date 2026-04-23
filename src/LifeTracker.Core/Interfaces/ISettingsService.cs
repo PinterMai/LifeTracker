@@ -32,4 +32,9 @@ public static class SettingsKeys
     public const string AiProvider = "ai_provider";
     public const string AiApiKey = "ai_api_key";
     public const string AiModel = "ai_model";
+
+    // Comma-separated list of X/Twitter handles (without @) the user
+    // trusts for trade signal. Fed into the Gemini grounded prompt so
+    // it searches what these accounts recently said about the ticker.
+    public const string TrustedXHandles = "trusted_x_handles";
 }

@@ -23,17 +23,24 @@ public static class TradePromptBuilder
         + "or predict future prices. Focus on: setup classification, position "
         + "sizing sanity, emotional tells in the notes, and one concrete, "
         + "actionable improvement grounded in the trader's own history. "
-        + "Respond in plain English under 200 words. No bullet lists unless "
-        + "the user asked for them.";
+        + "When Google Search is available, use it to check recent headlines "
+        + "about the ticker (earnings, guidance, catalysts) and what the "
+        + "listed trusted X/Twitter accounts recently said about it — cite "
+        + "sources when you quote them. Respond in plain English under "
+        + "250 words. No bullet lists unless the user asked for them.";
 
     /// <summary>
     /// Build the user-facing prompt describing a single trade and up to
-    /// `historyLimit` prior trades for context.
+    /// <paramref name="historyLimit"/> prior trades for context. If the
+    /// caller supplies <paramref name="trustedHandles"/>, the prompt
+    /// nudges the model to prefer those accounts when researching the
+    /// ticker — Gemini's Google Search tool does the actual fetching.
     /// </summary>
     public static string BuildAnalyzePrompt(
         Trade trade,
         IReadOnlyList<Trade> history,
-        int historyLimit = 30)
+        int historyLimit = 30,
+        IReadOnlyList<string>? trustedHandles = null)
     {
         ArgumentNullException.ThrowIfNull(trade);
         ArgumentNullException.ThrowIfNull(history);
@@ -66,11 +73,26 @@ public static class TradePromptBuilder
             }
         }
 
+        if (trustedHandles is { Count: > 0 })
+        {
+            sb.AppendLine();
+            sb.AppendLine("== Trusted X accounts the trader follows ==");
+            sb.AppendLine(
+                "When researching the ticker, prefer what these accounts said "
+                + "recently (search e.g. `site:x.com @handle TICKER`). Do not "
+                + "invent quotes — only cite if you actually found a post.");
+            foreach (var h in trustedHandles)
+            {
+                sb.AppendLine(CultureInfo.InvariantCulture, $"  @{h}");
+            }
+        }
+
         sb.AppendLine();
         sb.AppendLine("Tell the user:");
         sb.AppendLine("1. How this trade fits their pattern (win/loss profile, ticker, direction).");
-        sb.AppendLine("2. One concrete improvement grounded in their own history.");
-        sb.AppendLine("3. A red or green flag you see in the notes, if anything jumps out.");
+        sb.AppendLine("2. Any recent news or sentiment about the ticker that's relevant to the setup.");
+        sb.AppendLine("3. One concrete improvement grounded in their own history.");
+        sb.AppendLine("4. A red or green flag you see in the notes, if anything jumps out.");
 
         return sb.ToString();
     }

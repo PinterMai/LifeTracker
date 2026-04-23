@@ -46,6 +46,24 @@ public sealed class BrowserDbPersistence : IAsyncDisposable
         await module.InvokeVoidAsync("saveDb", bytes);
     }
 
+    /// <summary>
+    /// Diagnostic snapshot shown on the Settings page so the user can
+    /// verify their data really is in IndexedDB and that the browser
+    /// granted persistent storage (prevents iOS Safari 7-day eviction).
+    /// </summary>
+    public async Task<StorageInfo> GetStorageInfoAsync()
+    {
+        var module = await _moduleTask.Value;
+        return await module.InvokeAsync<StorageInfo>("getStorageInfo");
+    }
+
+    public sealed record StorageInfo(
+        bool ApiSupported,
+        bool? Persisted,
+        long? UsageBytes,
+        long? QuotaBytes,
+        long DbBytes);
+
     public async ValueTask DisposeAsync()
     {
         if (_moduleTask.IsValueCreated)

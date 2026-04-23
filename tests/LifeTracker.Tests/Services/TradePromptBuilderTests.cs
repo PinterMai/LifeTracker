@@ -109,6 +109,32 @@ public class TradePromptBuilderTests
         Assert.Throws<ArgumentNullException>(() => TradePromptBuilder.BuildAnalyzePrompt(trade, null!));
     }
 
+    [Fact]
+    public void BuildAnalyzePrompt_IncludesTrustedHandles_WhenProvided()
+    {
+        var trade = new Trade { Id = 1, Ticker = "AAPL" };
+        var handles = new[] { "Yeah_Dave", "michaelsikand" };
+
+        var prompt = TradePromptBuilder.BuildAnalyzePrompt(
+            trade, Array.Empty<Trade>(), trustedHandles: handles);
+
+        Assert.Contains("Trusted X accounts", prompt);
+        Assert.Contains("@Yeah_Dave", prompt);
+        Assert.Contains("@michaelsikand", prompt);
+    }
+
+    [Fact]
+    public void BuildAnalyzePrompt_OmitsTrustedSection_WhenHandlesEmptyOrNull()
+    {
+        var trade = new Trade { Id = 1, Ticker = "AAPL" };
+
+        var nullHandles = TradePromptBuilder.BuildAnalyzePrompt(trade, Array.Empty<Trade>(), trustedHandles: null);
+        var emptyHandles = TradePromptBuilder.BuildAnalyzePrompt(trade, Array.Empty<Trade>(), trustedHandles: Array.Empty<string>());
+
+        Assert.DoesNotContain("Trusted X accounts", nullHandles);
+        Assert.DoesNotContain("Trusted X accounts", emptyHandles);
+    }
+
     private static IEnumerable<int> FindAll(string haystack, string needle)
     {
         var idx = 0;
