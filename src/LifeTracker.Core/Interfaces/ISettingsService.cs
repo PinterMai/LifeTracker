@@ -43,4 +43,14 @@ public static class SettingsKeys
     // mentioned on X shows up in autocomplete even if it wasn't in
     // the pre-built NASDAQ+other-listed dataset.
     public const string DiscoveredTickers = "discovered_tickers";
+
+    // ISO-8601 UTC timestamp of the last successful Signals scan.
+    // Used to client-side-rate-limit the Scan button so an accidental
+    // re-click doesn't burn the Gemini free-tier daily quota.
+    public const string LastSignalsScanAt = "last_signals_scan_at";
+
+    // Cached JSON array of the last successful Signals scan result.
+    // Rehydrated on page load so the user sees the last scan without
+    // paying for a new API call on every navigation.
+    public const string LastSignalsResult = "last_signals_result";
 }

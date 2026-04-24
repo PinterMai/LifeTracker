@@ -1,4 +1,5 @@
 @page "/signals"
+@using System.Text.Json
 @using LifeTracker.Core.Interfaces
 @using LifeTracker.Core.Models
 @using LifeTracker.Web.Services
@@ -38,14 +39,30 @@
         </div>
 
         <div class="form-actions">
-            <button class="btn btn-primary" @onclick="ScanAsync" disabled="@_isScanning">
+            <button class="btn btn-primary"
+                    @onclick="ScanAsync"
+                    disabled="@(_isScanning || IsOnCooldown)">
                 @(_isScanning ? "Scanning…" : "Scan now")
             </button>
             @if (_lastScan is not null)
             {
-                <span class="muted">Last scan: @_lastScan.Value.ToLocalTime().ToString("HH:mm:ss")</span>
+                <span class="muted">
+                    Last scan: @FormatAgo(_lastScan.Value)
+                    @if (IsOnCooldown)
+                    {
+                        <text> · wait @FormatRemaining() before rescanning</text>
+                    }
+                </span>
             }
         </div>
+        @if (IsOnCooldown)
+        {
+            <div class="status info">
+                Cached result shown. Gemini free tier has a small daily quota,
+                so the scan button unlocks @CooldownHours hours after the
+                previous scan to avoid burning it on duplicate searches.
+            </div>
+        }
 
         @if (_error is not null)
         {
@@ -91,11 +108,20 @@
 </div>
 
 @code {
+    // Min hours between scans. Gemini free tier has a tight daily quota
+    // for grounded (Google Search) calls and each scan pushes 20+ handles
+    // through it — so one accidental double-click can wipe the day's budget.
+    private const int CooldownHours = 2;
+
     private IReadOnlyList<string>? _handles;
     private IReadOnlyList<SignalCandidate>? _signals;
     private DateTime? _lastScan;
     private bool _isScanning;
     private string? _error;
+
+    private bool IsOnCooldown =>
+        _lastScan is DateTime ts
+        && DateTime.UtcNow - ts < TimeSpan.FromHours(CooldownHours);
 
     protected override async Task OnInitializedAsync()
     {
@@ -106,20 +132,61 @@
             .Where(h => h.Length > 0)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+
+        await HydrateCachedScanAsync();
+    }
+
+    /// <summary>
+    /// Load the last scan from settings so the page shows results
+    /// immediately without hitting Gemini again.
+    /// </summary>
+    private async Task HydrateCachedScanAsync()
+    {
+        var tsRaw = await SettingsSvc.GetAsync(SettingsKeys.LastSignalsScanAt);
+        if (DateTime.TryParse(
+                tsRaw,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal
+                    | System.Globalization.DateTimeStyles.AdjustToUniversal,
+                out var ts))
+        {
+            _lastScan = ts;
+        }
+
+        var json = await SettingsSvc.GetAsync(SettingsKeys.LastSignalsResult);
+        if (string.IsNullOrWhiteSpace(json)) return;
+        try
+        {
+            _signals = JsonSerializer.Deserialize<List<SignalCandidate>>(json)
+                ?? new List<SignalCandidate>();
+        }
+        catch (JsonException)
+        {
+            // Corrupt cache — ignore, user can just rescan.
+            _signals = null;
+        }
     }
 
     private async Task ScanAsync()
     {
         if (_handles is null || _handles.Count == 0) return;
+        if (IsOnCooldown) return;
 
         _isScanning = true;
         _error = null;
-        _signals = null;
         try
         {
             var results = await Ai.ScanSignalsAsync(_handles);
             _signals = results;
             _lastScan = DateTime.UtcNow;
+
+            // Persist so a reload or tab revisit doesn't re-charge Gemini.
+            await SettingsSvc.SetAsync(
+                SettingsKeys.LastSignalsScanAt,
+                _lastScan.Value.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+            await SettingsSvc.SetAsync(
+                SettingsKeys.LastSignalsResult,
+                JsonSerializer.Serialize(results));
 
             // Feed every discovered ticker into the catalog so the
             // autocomplete on TradeEdit picks it up without a reload.
@@ -149,6 +216,25 @@
         // TradeEdit reads the query string on its own.
         Nav.NavigateTo($"trades/new?ticker={Uri.EscapeDataString(s.Ticker)}");
         return Task.CompletedTask;
+    }
+
+    private static string FormatAgo(DateTime utc)
+    {
+        var diff = DateTime.UtcNow - utc;
+        if (diff < TimeSpan.FromMinutes(1)) return "just now";
+        if (diff < TimeSpan.FromHours(1)) return $"{(int)diff.TotalMinutes}m ago";
+        if (diff < TimeSpan.FromDays(1)) return $"{(int)diff.TotalHours}h ago";
+        return utc.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+    }
+
+    private string FormatRemaining()
+    {
+        if (_lastScan is null) return "";
+        var remaining = TimeSpan.FromHours(CooldownHours) - (DateTime.UtcNow - _lastScan.Value);
+        if (remaining <= TimeSpan.Zero) return "now";
+        return remaining.TotalHours >= 1
+            ? $"{(int)remaining.TotalHours}h {remaining.Minutes}m"
+            : $"{(int)remaining.TotalMinutes}m";
     }
 }
 
