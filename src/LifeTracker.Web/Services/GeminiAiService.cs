@@ -103,40 +103,48 @@ public sealed class GeminiAiService : IAiService
         return list.Count == 0 ? null : list;
     }
 
-    public async Task<IReadOnlyList<SignalCandidate>> ScanSignalsAsync(
+    public async Task<SignalsScanResult> ScanSignalsAsync(
         IReadOnlyList<string> handles,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(handles);
-        if (handles.Count == 0) return Array.Empty<SignalCandidate>();
+        if (handles.Count == 0) return SignalsScanResult.Empty;
 
         var (apiKey, model) = await GetKeyAndModelAsync(cancellationToken).ConfigureAwait(false);
 
-        // The prompt asks for a strict pipe-delimited format because
-        // grounded Gemini calls don't support responseSchema (conflict
-        // with google_search tool), and JSON in prose is flaky to parse.
-        // Pipe-delimited is dead-simple to regex out.
+        // Two output sections in one grounded call: raw SIGNAL lines and
+        // aggregated REC lines. Pipe-delimited because grounded Gemini
+        // doesn't support responseSchema (conflict with google_search)
+        // and JSON in prose is flaky to parse.
         var handleList = string.Join(", ", handles.Select(h => "@" + h.TrimStart('@')));
         var prompt =
             "You are scanning what these X/Twitter accounts recently posted about "
             + "US equities or crypto: " + handleList + ".\n\n"
             + "Using Google Search, look up recent posts (last 7 days) from each "
             + "account that mention a specific ticker (e.g. $AAPL, $NVDA, BTC). "
-            + "Prefer `site:x.com @handle` queries. For each mention you can "
-            + "verify, emit one line in this EXACT pipe-delimited format:\n\n"
-            + "SIGNAL: <handle> | <TICKER> | <bullish|bearish|neutral> | <short quote in plain text, max 140 chars> | <source url>\n\n"
+            + "Prefer `site:x.com @handle` queries.\n\n"
+            + "Output TWO sections, in this exact order, nothing else:\n\n"
+            + "[SIGNALS]\n"
+            + "One line per verified mention, in this EXACT format:\n"
+            + "SIGNAL: <handle> | <TICKER> | <bullish|bearish|neutral> | <short quote, max 140 chars, no pipes> | <source url>\n\n"
+            + "[RECOMMENDATIONS]\n"
+            + "Up to 5 lines, ranked by your conviction, in this EXACT format:\n"
+            + "REC: <TICKER> | <long|short|watch|avoid> | <reasoning, max 200 chars, no pipes> | <handle1,handle2,...>\n\n"
             + "Rules:\n"
-            + "- Ticker must be uppercase letters only (and optional .A/.B class suffix).\n"
-            + "- Never invent quotes — only emit a SIGNAL line if you actually found the post.\n"
-            + "- Skip accounts you couldn't find a recent post for.\n"
-            + "- If no signals found at all, output exactly: NO_SIGNALS\n"
-            + "- No prose, no bullet points, no extra commentary. Just SIGNAL lines or NO_SIGNALS.";
+            + "- Ticker must be uppercase letters only (optional .A/.B class suffix allowed).\n"
+            + "- A REC must reference a ticker that appears in [SIGNALS]. Do NOT invent tickers.\n"
+            + "- Action = long if dominant sentiment is bullish, short if bearish, watch if mixed/weak, avoid if a strong warning was posted.\n"
+            + "- Reasoning must summarize what the handles actually said — no your-own opinion, no boilerplate.\n"
+            + "- Prefer tickers where multiple handles agree. Single-handle picks are fine if conviction is clearly high.\n"
+            + "- Never fabricate quotes or URLs. If you can't find a post, skip the handle.\n"
+            + "- If no mentions at all, output exactly: NO_SIGNALS (and skip both sections).\n"
+            + "- No prose, no markdown, no commentary outside the SIGNAL/REC lines.";
 
         var tools = new[] { new GeminiTool(GoogleSearch: new object()) };
         var request = new GeminiRequest(
             SystemInstruction: new GeminiContent(new[] { new GeminiPart(
                 "You are a disciplined market scanner. You return only the "
-                + "requested SIGNAL lines or NO_SIGNALS. Never fabricate quotes.") }),
+                + "requested SIGNAL and REC lines or NO_SIGNALS. Never fabricate.") }),
             Contents: new[] { new GeminiContent(new[] { new GeminiPart(prompt) }) },
             Tools: tools);
 
@@ -146,23 +154,29 @@ public sealed class GeminiAiService : IAiService
             ? string.Concat(parts.Select(p => p.Text ?? string.Empty))
             : string.Empty;
 
-        return ParseSignalLines(text);
+        if (string.IsNullOrWhiteSpace(text) ||
+            text.Contains("NO_SIGNALS", StringComparison.OrdinalIgnoreCase))
+        {
+            return SignalsScanResult.Empty;
+        }
+
+        var signals = ParseSignalLines(text);
+        var recs = ParseRecLines(text, signals);
+        return new SignalsScanResult(recs, signals);
     }
 
-    // Lives here rather than on SignalCandidate so the parser can evolve
-    // with the prompt format without leaking Gemini-isms into Core.
+    // Parser regexes live here rather than on the Core models so the
+    // prompt format can evolve without leaking Gemini-isms into Core.
     private static readonly Regex SignalLineRx = new(
         @"^\s*SIGNAL:\s*(?<handle>[^|]+?)\s*\|\s*(?<ticker>[^|]+?)\s*\|\s*(?<sentiment>bullish|bearish|neutral)\s*\|\s*(?<quote>[^|]+?)\s*\|\s*(?<url>\S+)\s*$",
         RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Compiled);
 
+    private static readonly Regex RecLineRx = new(
+        @"^\s*REC:\s*(?<ticker>[^|]+?)\s*\|\s*(?<action>long|short|watch|avoid)\s*\|\s*(?<reasoning>[^|]+?)\s*\|\s*(?<handles>[^|]+?)\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Compiled);
+
     private static IReadOnlyList<SignalCandidate> ParseSignalLines(string text)
     {
-        if (string.IsNullOrWhiteSpace(text) ||
-            text.Contains("NO_SIGNALS", StringComparison.OrdinalIgnoreCase))
-        {
-            return Array.Empty<SignalCandidate>();
-        }
-
         var list = new List<SignalCandidate>();
         foreach (Match m in SignalLineRx.Matches(text))
         {
@@ -184,6 +198,46 @@ public sealed class GeminiAiService : IAiService
 
             list.Add(new SignalCandidate(handle, ticker, sentiment, quote,
                 string.IsNullOrWhiteSpace(url) ? null : url));
+        }
+        return list;
+    }
+
+    private static IReadOnlyList<Recommendation> ParseRecLines(
+        string text,
+        IReadOnlyList<SignalCandidate> signals)
+    {
+        // Build a set of tickers the model actually grounded with raw
+        // signals. Anything REC'd without a backing SIGNAL is dropped —
+        // that's the prompt's contract and our anti-hallucination guard.
+        var groundedTickers = new HashSet<string>(
+            signals.Select(s => s.Ticker),
+            StringComparer.OrdinalIgnoreCase);
+
+        var list = new List<Recommendation>();
+        foreach (Match m in RecLineRx.Matches(text))
+        {
+            var ticker = m.Groups["ticker"].Value.TrimStart('$').Trim().ToUpperInvariant();
+            if (string.IsNullOrWhiteSpace(ticker)) continue;
+            if (groundedTickers.Count > 0 && !groundedTickers.Contains(ticker)) continue;
+
+            var action = m.Groups["action"].Value.ToLowerInvariant() switch
+            {
+                "long" => RecommendationAction.Long,
+                "short" => RecommendationAction.Short,
+                "avoid" => RecommendationAction.Avoid,
+                _ => RecommendationAction.Watch
+            };
+
+            var reasoning = m.Groups["reasoning"].Value.Trim().Trim('"');
+
+            var handles = m.Groups["handles"].Value
+                .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(h => h.Trim().TrimStart('@'))
+                .Where(h => h.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            list.Add(new Recommendation(ticker, action, reasoning, handles));
         }
         return list;
     }

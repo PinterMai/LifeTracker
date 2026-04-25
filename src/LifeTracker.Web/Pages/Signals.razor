@@ -12,11 +12,11 @@
 
 <div class="signals-page">
     <div class="page-header">
-        <h1>Signals</h1>
+        <h1>Today's picks</h1>
         <p class="muted">
-            Gemini + Google Search scan of what your trusted X accounts said about tickers
-            in the last week. Coverage is whatever Google has indexed — not a real-time
-            feed.
+            Gemini reads the last week of posts from your trusted X handles, then
+            aggregates them into a short list of tickers worth a closer look.
+            Coverage is whatever Google has indexed — not a real-time feed.
         </p>
     </div>
 
@@ -69,9 +69,9 @@
             <div class="status error">@_error</div>
         }
 
-        @if (_signals is not null)
+        @if (_scan is not null)
         {
-            @if (_signals.Count == 0)
+            @if (_scan.Recommendations.Count == 0 && _scan.RawSignals.Count == 0)
             {
                 <div class="status info">
                     No ticker mentions found. Either your handles went quiet this week or
@@ -80,28 +80,67 @@
             }
             else
             {
-                <div class="signal-grid">
-                    @foreach (var s in _signals)
-                    {
-                        <div class="signal-card sentiment-@s.Sentiment.ToString().ToLower()">
-                            <div class="signal-head">
-                                <span class="ticker">@s.Ticker</span>
-                                <span class="sentiment">@s.Sentiment</span>
-                            </div>
-                            <div class="handle">@@@s.Handle</div>
-                            <blockquote class="quote">@s.Quote</blockquote>
-                            <div class="signal-actions">
-                                @if (s.SourceUrl is { Length: > 0 } url)
+                @if (_scan.Recommendations.Count > 0)
+                {
+                    <h2 class="section-title">Recommendations</h2>
+                    <div class="rec-grid">
+                        @foreach (var r in _scan.Recommendations)
+                        {
+                            <div class="rec-card action-@r.Action.ToString().ToLower()">
+                                <div class="rec-head">
+                                    <span class="rec-ticker">@r.Ticker</span>
+                                    <span class="rec-action">@r.Action.ToString().ToUpper()</span>
+                                </div>
+                                <p class="rec-reasoning">@r.Reasoning</p>
+                                @if (r.SupportingHandles.Count > 0)
                                 {
-                                    <a class="source" href="@url" target="_blank" rel="noopener">view on X</a>
+                                    <div class="rec-supporters">
+                                        <span class="muted">From:</span>
+                                        @string.Join(", ", r.SupportingHandles.Select(h => "@" + h))
+                                    </div>
                                 }
-                                <button class="btn btn-link" @onclick="() => OpenTradeAsync(s)">
-                                    Start trade →
-                                </button>
+                                <div class="rec-actions">
+                                    <button class="btn btn-link"
+                                            @onclick="() => OpenTradeForTicker(r.Ticker)">
+                                        Start trade →
+                                    </button>
+                                </div>
                             </div>
+                        }
+                    </div>
+                }
+
+                @if (_scan.RawSignals.Count > 0)
+                {
+                    <details class="raw-signals">
+                        <summary>
+                            Raw mentions (@_scan.RawSignals.Count)
+                            <span class="muted">— what each handle actually said</span>
+                        </summary>
+                        <div class="signal-grid">
+                            @foreach (var s in _scan.RawSignals)
+                            {
+                                <div class="signal-card sentiment-@s.Sentiment.ToString().ToLower()">
+                                    <div class="signal-head">
+                                        <span class="ticker">@s.Ticker</span>
+                                        <span class="sentiment">@s.Sentiment</span>
+                                    </div>
+                                    <div class="handle">@@@s.Handle</div>
+                                    <blockquote class="quote">@s.Quote</blockquote>
+                                    <div class="signal-actions">
+                                        @if (s.SourceUrl is { Length: > 0 } url)
+                                        {
+                                            <a class="source" href="@url" target="_blank" rel="noopener">view on X</a>
+                                        }
+                                        <button class="btn btn-link" @onclick="() => OpenTradeForTicker(s.Ticker)">
+                                            Start trade →
+                                        </button>
+                                    </div>
+                                </div>
+                            }
                         </div>
-                    }
-                </div>
+                    </details>
+                }
             }
         }
     }
@@ -114,7 +153,7 @@
     private const int CooldownHours = 2;
 
     private IReadOnlyList<string>? _handles;
-    private IReadOnlyList<SignalCandidate>? _signals;
+    private SignalsScanResult? _scan;
     private DateTime? _lastScan;
     private bool _isScanning;
     private string? _error;
@@ -138,7 +177,9 @@
 
     /// <summary>
     /// Load the last scan from settings so the page shows results
-    /// immediately without hitting Gemini again.
+    /// immediately without hitting Gemini again. Also tolerates an old
+    /// cache shape (just SignalCandidate[]) so users on the previous
+    /// version don't see an empty page after upgrade.
     /// </summary>
     private async Task HydrateCachedScanAsync()
     {
@@ -155,15 +196,25 @@
 
         var json = await SettingsSvc.GetAsync(SettingsKeys.LastSignalsResult);
         if (string.IsNullOrWhiteSpace(json)) return;
+
         try
         {
-            _signals = JsonSerializer.Deserialize<List<SignalCandidate>>(json)
-                ?? new List<SignalCandidate>();
+            // New shape: SignalsScanResult.
+            _scan = JsonSerializer.Deserialize<SignalsScanResult>(json);
+            if (_scan is null || (_scan.RawSignals.Count == 0 && _scan.Recommendations.Count == 0))
+            {
+                // Could be old cache (raw array). Try fallback.
+                var legacy = JsonSerializer.Deserialize<List<SignalCandidate>>(json);
+                if (legacy is { Count: > 0 })
+                {
+                    _scan = new SignalsScanResult(Array.Empty<Recommendation>(), legacy);
+                }
+            }
         }
         catch (JsonException)
         {
             // Corrupt cache — ignore, user can just rescan.
-            _signals = null;
+            _scan = null;
         }
     }
 
@@ -176,8 +227,8 @@
         _error = null;
         try
         {
-            var results = await Ai.ScanSignalsAsync(_handles);
-            _signals = results;
+            var result = await Ai.ScanSignalsAsync(_handles);
+            _scan = result;
             _lastScan = DateTime.UtcNow;
 
             // Persist so a reload or tab revisit doesn't re-charge Gemini.
@@ -186,11 +237,11 @@
                 _lastScan.Value.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
             await SettingsSvc.SetAsync(
                 SettingsKeys.LastSignalsResult,
-                JsonSerializer.Serialize(results));
+                JsonSerializer.Serialize(result));
 
             // Feed every discovered ticker into the catalog so the
             // autocomplete on TradeEdit picks it up without a reload.
-            foreach (var s in results)
+            foreach (var s in result.RawSignals)
             {
                 await Catalog.AddDiscoveredAsync(
                     new TickerSymbol(s.Ticker, $"{s.Ticker} (from @{s.Handle})", "X Scan"));
@@ -210,12 +261,10 @@
         }
     }
 
-    private Task OpenTradeAsync(SignalCandidate s)
+    private void OpenTradeForTicker(string ticker)
     {
         // Deep-link into the new-trade form with the ticker prefilled.
-        // TradeEdit reads the query string on its own.
-        Nav.NavigateTo($"trades/new?ticker={Uri.EscapeDataString(s.Ticker)}");
-        return Task.CompletedTask;
+        Nav.NavigateTo($"trades/new?ticker={Uri.EscapeDataString(ticker)}");
     }
 
     private static string FormatAgo(DateTime utc)
@@ -263,6 +312,13 @@
         margin-bottom: 1rem;
     }
 
+    .section-title {
+        font-size: 1.1rem;
+        margin: 1.5rem 0 0.75rem;
+        color: #f0f0f5;
+        letter-spacing: 0.3px;
+    }
+
     .btn-primary {
         padding: 0.6rem 1.25rem;
         background: #4ade80;
@@ -296,6 +352,104 @@
     .status.info { background: #1e3a5f; color: #93c5fd; }
     .status.error { background: #7f1d1d; color: #f87171; }
 
+    /* --- Recommendations (top, prominent) --- */
+
+    .rec-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .rec-card {
+        background: #1f2328;
+        border-radius: 12px;
+        padding: 1rem 1.1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        border-left: 4px solid #2a2f36;
+    }
+
+    .rec-card.action-long { border-left-color: #4ade80; }
+    .rec-card.action-short { border-left-color: #f87171; }
+    .rec-card.action-watch { border-left-color: #93c5fd; }
+    .rec-card.action-avoid { border-left-color: #f59e0b; }
+
+    .rec-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+    }
+
+    .rec-ticker {
+        font-size: 1.4rem;
+        font-weight: 700;
+        letter-spacing: 0.4px;
+        color: #f0f0f5;
+    }
+
+    .rec-action {
+        font-size: 0.75rem;
+        font-weight: 700;
+        letter-spacing: 0.6px;
+        padding: 0.15rem 0.55rem;
+        border-radius: 999px;
+        background: #2a2f36;
+        color: #a0a0b0;
+    }
+
+    .rec-card.action-long .rec-action { background: #14532d; color: #4ade80; }
+    .rec-card.action-short .rec-action { background: #7f1d1d; color: #f87171; }
+    .rec-card.action-watch .rec-action { background: #1e3a5f; color: #93c5fd; }
+    .rec-card.action-avoid .rec-action { background: #78350f; color: #f59e0b; }
+
+    .rec-reasoning {
+        margin: 0;
+        color: #e5e7eb;
+        font-size: 0.95rem;
+        line-height: 1.45;
+    }
+
+    .rec-supporters {
+        font-size: 0.8rem;
+        color: #93c5fd;
+    }
+
+    .rec-supporters .muted { margin-right: 0.3rem; }
+
+    .rec-actions {
+        display: flex;
+        justify-content: flex-end;
+    }
+
+    /* --- Raw signals (collapsed drill-down) --- */
+
+    .raw-signals {
+        margin-top: 0.5rem;
+        background: #1f2328;
+        border-radius: 8px;
+        padding: 0.75rem 1rem;
+    }
+
+    .raw-signals > summary {
+        cursor: pointer;
+        font-weight: 600;
+        color: #f0f0f5;
+        list-style: none;
+    }
+
+    .raw-signals > summary::-webkit-details-marker { display: none; }
+    .raw-signals > summary::before {
+        content: "▸ ";
+        color: #a0a0b0;
+        margin-right: 0.25rem;
+    }
+
+    .raw-signals[open] > summary::before { content: "▾ "; }
+
+    .raw-signals .signal-grid { margin-top: 0.75rem; }
+
     .signal-grid {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
@@ -311,6 +465,8 @@
         gap: 0.5rem;
         border-left: 3px solid #2a2f36;
     }
+
+    .raw-signals .signal-card { background: #181c20; }
 
     .signal-card.sentiment-bullish { border-left-color: #4ade80; }
     .signal-card.sentiment-bearish { border-left-color: #f87171; }

@@ -19,12 +19,15 @@ public interface IAiService
 
     /// <summary>
     /// Scan recent public posts from the given X/Twitter handles and
-    /// extract ticker mentions with sentiment. Backed by Gemini +
-    /// Google Search grounding — only indexed posts are visible, so
-    /// coverage is partial. Returns an empty list if nothing was found
-    /// or the grounding call didn't surface anything parseable.
+    /// produce two views in a single grounded call: per-handle ticker
+    /// mentions (raw signals) and an aggregated short list of
+    /// recommendations the user should actually consider today.
+    /// Backed by Gemini + Google Search grounding — only indexed posts
+    /// are visible, so coverage is partial. Returns
+    /// <see cref="SignalsScanResult.Empty"/> if nothing was found or
+    /// the grounding call didn't surface anything parseable.
     /// </summary>
-    Task<IReadOnlyList<SignalCandidate>> ScanSignalsAsync(
+    Task<SignalsScanResult> ScanSignalsAsync(
         IReadOnlyList<string> handles,
         CancellationToken cancellationToken = default);
 
