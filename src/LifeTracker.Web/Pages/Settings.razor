@@ -4,6 +4,7 @@
 @inject ISettingsService SettingsSvc
 @inject IAiService Ai
 @inject BrowserDbPersistence Persistence
+@inject HttpClient Http
 
 <PageTitle>Settings</PageTitle>
 
@@ -82,6 +83,35 @@
     </section>
 
     <section class="card">
+        <h2>Signals backend</h2>
+        <p class="muted">
+            Optional Cloudflare Worker URL. If set, the Signals page reads from
+            the worker's daily-cron snapshot instead of calling Gemini from your
+            browser — your local quota stays untouched. Setup steps live in
+            <code>workers/signals/README.md</code>.
+        </p>
+        <div class="form-row">
+            <label>Backend URL</label>
+            <input type="text" class="form-control" @bind="_backendUrl"
+                   placeholder="https://lifetracker-signals.your-subdomain.workers.dev" />
+            <p class="hint">Leave empty to keep using direct Gemini calls from this browser.</p>
+        </div>
+        <div class="form-actions">
+            <button class="btn btn-primary" @onclick="SaveBackendAsync" disabled="@_isBusy">Save backend URL</button>
+            @if (!string.IsNullOrWhiteSpace(_backendUrl))
+            {
+                <button class="btn btn-secondary" @onclick="TestBackendAsync" disabled="@_isBusy">
+                    @(_isBusy ? "Checking…" : "Check /health")
+                </button>
+            }
+        </div>
+        @if (_backendStatus is not null)
+        {
+            <div class="status @_backendStatusKind">@_backendStatus</div>
+        }
+    </section>
+
+    <section class="card">
         <h2>Storage</h2>
         <p class="muted">
             Trades live in your browser's IndexedDB. On mobile, iOS Safari and
@@ -140,6 +170,10 @@
     private string? _handlesStatus;
     private string _handlesStatusKind = "info";
 
+    private string _backendUrl = string.Empty;
+    private string? _backendStatus;
+    private string _backendStatusKind = "info";
+
     private BrowserDbPersistence.StorageInfo? _storage;
 
     protected override async Task OnInitializedAsync()
@@ -147,6 +181,7 @@
         _apiKey = await SettingsSvc.GetAsync(SettingsKeys.AiApiKey) ?? string.Empty;
         _model = await SettingsSvc.GetAsync(SettingsKeys.AiModel) ?? Services.GeminiAiService.DefaultModel;
         _xHandles = await SettingsSvc.GetAsync(SettingsKeys.TrustedXHandles) ?? string.Empty;
+        _backendUrl = await SettingsSvc.GetAsync(SettingsKeys.SignalsBackendUrl) ?? string.Empty;
         await RefreshStorageAsync();
     }
 
@@ -275,6 +310,79 @@
     {
         _status = message;
         _statusKind = kind;
+    }
+
+    private async Task SaveBackendAsync()
+    {
+        _isBusy = true;
+        try
+        {
+            var trimmed = (_backendUrl ?? string.Empty).Trim().TrimEnd('/');
+            if (string.IsNullOrWhiteSpace(trimmed))
+            {
+                await SettingsSvc.RemoveAsync(SettingsKeys.SignalsBackendUrl);
+                _backendUrl = string.Empty;
+                ShowBackend("Cleared. Signals will use direct Gemini calls again.", "success");
+            }
+            else if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri) ||
+                     (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            {
+                ShowBackend("Not a valid http(s) URL.", "error");
+            }
+            else
+            {
+                await SettingsSvc.SetAsync(SettingsKeys.SignalsBackendUrl, trimmed);
+                _backendUrl = trimmed;
+                ShowBackend("Saved.", "success");
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowBackend(ex.Message, "error");
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private async Task TestBackendAsync()
+    {
+        _isBusy = true;
+        ShowBackend("Checking…", "info");
+        try
+        {
+            var url = (_backendUrl ?? string.Empty).Trim().TrimEnd('/');
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                ShowBackend("Enter a URL first.", "error");
+                return;
+            }
+
+            using var resp = await Http.GetAsync(url + "/health");
+            if (resp.IsSuccessStatusCode)
+            {
+                ShowBackend("Worker is reachable.", "success");
+            }
+            else
+            {
+                ShowBackend($"Worker responded with {(int)resp.StatusCode}.", "error");
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowBackend(ex.Message, "error");
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private void ShowBackend(string message, string kind)
+    {
+        _backendStatus = message;
+        _backendStatusKind = kind;
     }
 }
 

@@ -7,6 +7,7 @@
 @inject ISettingsService SettingsSvc
 @inject StaticTickerCatalog Catalog
 @inject NavigationManager Nav
+@inject BackendSignalsClient Backend
 
 <PageTitle>Signals</PageTitle>
 
@@ -20,7 +21,35 @@
         </p>
     </div>
 
-    @if (_handles is null)
+    @if (_useBackend)
+    {
+        <div class="handles-summary">
+            <strong>Backend mode:</strong>
+            <span class="muted">
+                A Cloudflare Worker runs the daily scan with its own Gemini key.
+                Your browser just reads the latest snapshot.
+            </span>
+        </div>
+
+        <div class="form-actions">
+            <button class="btn btn-primary"
+                    @onclick="RefreshFromBackendAsync"
+                    disabled="@_isScanning">
+                @(_isScanning ? "Loading…" : "Refresh")
+            </button>
+            @if (_lastScan is not null)
+            {
+                <span class="muted">
+                    Last scan: @FormatAgo(_lastScan.Value)
+                    @if (_backendModel is { Length: > 0 } m)
+                    {
+                        <text> · @m</text>
+                    }
+                </span>
+            }
+        </div>
+    }
+    else if (_handles is null)
     {
         <div class="status info">Loading…</div>
     }
@@ -61,6 +90,10 @@
                 Cached result shown. Gemini free tier has a small daily quota,
                 so the scan button unlocks @CooldownHours hours after the
                 previous scan to avoid burning it on duplicate searches.
+                <br />
+                Want to skip the limit? Deploy the Cloudflare Worker (see
+                <code>workers/signals/README.md</code>) and paste its URL into
+                <a href="settings">Settings</a>.
             </div>
         }
 
@@ -156,6 +189,8 @@
     private SignalsScanResult? _scan;
     private DateTime? _lastScan;
     private bool _isScanning;
+    private bool _useBackend;
+    private string? _backendModel;
     private string? _error;
 
     private bool IsOnCooldown =>
@@ -164,6 +199,16 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // If a backend URL is configured, the worker is the source of
+        // truth — we don't need handles or cooldown logic at all.
+        _useBackend = await Backend.IsConfiguredAsync();
+
+        if (_useBackend)
+        {
+            await RefreshFromBackendAsync();
+            return;
+        }
+
         var raw = await SettingsSvc.GetAsync(SettingsKeys.TrustedXHandles) ?? string.Empty;
         _handles = raw
             .Split(new[] { ',', ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries)
@@ -173,6 +218,44 @@
             .ToArray();
 
         await HydrateCachedScanAsync();
+    }
+
+    private async Task RefreshFromBackendAsync()
+    {
+        _isScanning = true;
+        _error = null;
+        try
+        {
+            var snapshot = await Backend.GetLatestAsync();
+            if (snapshot is null)
+            {
+                _error = "Backend hasn't produced its first scan yet. The cron runs " +
+                         "daily at 07:30 UTC, or you can trigger it manually with " +
+                         "POST /signals/scan from the worker README.";
+                _scan = null;
+                _lastScan = null;
+                return;
+            }
+
+            _scan = snapshot.Result;
+            _lastScan = snapshot.ScannedAtUtc;
+            _backendModel = snapshot.Model;
+
+            // Still merge discovered tickers into the autocomplete catalog.
+            foreach (var s in snapshot.Result.RawSignals)
+            {
+                await Catalog.AddDiscoveredAsync(
+                    new TickerSymbol(s.Ticker, $"{s.Ticker} (from @{s.Handle})", "X Scan"));
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Backend unreachable: {ex.Message}";
+        }
+        finally
+        {
+            _isScanning = false;
+        }
     }
 
     /// <summary>

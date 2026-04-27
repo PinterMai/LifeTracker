@@ -1,0 +1,40 @@
+# Cloudflare Worker that runs the daily X/Twitter signal scan with one
+# Gemini key on the server side, parks the result in KV, and exposes it
+# to the LifeTracker PWA via a single GET endpoint.
+#
+# This means the Gemini quota is the WORKER's quota, not the user's
+# browser, so reload-spam in the app costs nothing.
+
+name = "lifetracker-signals"
+main = "src/index.ts"
+compatibility_date = "2026-04-15"
+
+# --- Daily scan ----------------------------------------------------------
+# 07:30 UTC = 09:30 CEST. Gemini's free-tier daily quota resets at
+# Pacific midnight (07:00 UTC during PDT, 08:00 UTC during PST), so
+# scanning a bit later means we always run on a fresh quota.
+[triggers]
+crons = ["30 7 * * *"]
+
+# --- KV ------------------------------------------------------------------
+# Stores the latest scan as JSON under the key "signals:latest".
+# Replace the id with your own after running:
+#   wrangler kv namespace create SIGNALS
+[[kv_namespaces]]
+binding = "SIGNALS"
+id = "REPLACE_WITH_YOUR_KV_ID"
+
+# --- Public config -------------------------------------------------------
+# HANDLES is comma-separated, no @ prefix. Edit here to change who the
+# cron scans without redeploying secrets.
+# ALLOWED_ORIGIN locks the GET endpoint to your deployed app's origin
+# (use "*" during development if you don't care).
+[vars]
+HANDLES = "aleabitoreddit, Yeah_Dave, Kaizen_Investor, michaelsikand, degentradingLSD, Blinklebloop, Frenchie_, pepemoonboy, PhotonCap, damnang2, illyquid, realDonaldTrump, crux_capital_, KawzInvests, vikramskr, RJCcapital, RJC, hassytrades, PlayBookTrades, TheValueist, futurist_lens, Mr_Derivatives, nansen_intern, THR, Rewkang"
+ALLOWED_ORIGIN = "*"
+GEMINI_MODEL = "gemini-flash-latest"
+
+# --- Secrets (set with `wrangler secret put GEMINI_API_KEY`) -------------
+# GEMINI_API_KEY      required    Google AI Studio key for grounded calls
+# SCAN_TRIGGER_SECRET optional    if set, POST /signals/scan?key=<this>
+#                                 forces a fresh scan (handy for debugging)

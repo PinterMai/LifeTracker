@@ -53,4 +53,10 @@ public static class SettingsKeys
     // Rehydrated on page load so the user sees the last scan without
     // paying for a new API call on every navigation.
     public const string LastSignalsResult = "last_signals_result";
+
+    // Base URL of the Cloudflare Worker that runs the daily Gemini scan
+    // server-side. When set, the Signals page reads from
+    // <url>/signals/latest instead of calling Gemini from the browser.
+    // Empty/null = legacy direct-from-browser mode.
+    public const string SignalsBackendUrl = "signals_backend_url";
 }

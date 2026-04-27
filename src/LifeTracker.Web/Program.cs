@@ -37,6 +37,11 @@ builder.Services.AddScoped<ITradeRepository>(sp =>
 builder.Services.AddScoped<ISettingsService, BrowserSettings>();
 builder.Services.AddScoped<IAiService, GeminiAiService>();
 
+// Optional Cloudflare Worker that runs the daily Gemini scan server-side.
+// When the user has set a backend URL in Settings, the Signals page
+// reads from this client instead of calling Gemini from the browser.
+builder.Services.AddScoped<BackendSignalsClient>();
+
 // --- Autocomplete ---
 // StaticTickerCatalog pulls wwwroot/data/tickers.json on first search and
 // keeps it cached for the session. Also merges tickers the Signals scan
