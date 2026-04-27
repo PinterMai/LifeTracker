@@ -1,5 +1,54 @@
 # Progress log
 
+## 2026-04-27 — Session 5: Signals + Worker backend, WPF cleanup
+
+### Built
+
+- **Daily Signals scan** (`Pages/Signals.razor` + `GeminiAiService.ScanSignalsAsync`)
+  - Single grounded Gemini call per scan with `tools: [{google_search: {}}]`.
+  - Pipe-delimited `[SIGNALS]` + `[RECOMMENDATIONS]` output (no JSON schema
+    on grounded calls, so the parser is stricter).
+  - Anti-hallucination guard: a Recommendation ticker is dropped if it never
+    appears in the SIGNALS section — prevents the model from inventing
+    tickers nobody mentioned.
+  - Client-side `last_signals_result` cache + 2h cooldown on the Scan button
+    so accidental re-clicks don't deplete the daily Gemini free tier.
+
+- **Signals backend** (`workers/signals/`)
+  - Cloudflare Worker, TypeScript. Endpoints: `/health`, `/signals/latest`,
+    `/signals/scan?key=…` (manual trigger guarded by `SCAN_TRIGGER_SECRET`).
+  - `scheduled()` cron at 07:30 UTC stores the result in KV under
+    `signals:latest` with `{result, scannedAtUtc, handleCount, model}`.
+  - Worker carries its own `GEMINI_API_KEY` secret, so the user's browser
+    never burns quota for the daily scan.
+  - Frontend mode switch: when `SignalsBackendUrl` is set in Settings,
+    `Signals.razor` reads from `BackendSignalsClient` instead of calling
+    Gemini, hides cooldown UI and shows a "Refresh" button + last-scan
+    timestamp from the snapshot metadata.
+  - Setup steps documented in `workers/signals/README.md`.
+
+- **WPF removal** — dropped `src/LifeTracker.WPF/` and the `.slnx`
+  reference. Solution now builds cleanly with just Core, Data, Web, and
+  the test project.
+
+### Verified
+
+- `dotnet build` — 0 errors, 0 warnings.
+- `dotnet test` — 30/30 passing.
+- Live smoke test of direct-from-browser Signals scan with the user's
+  Gemini key returned real recommendations + supporting handles per the
+  trusted-handles whitelist.
+
+### Not yet done
+
+- User-side: deploy the worker (`wrangler login`, `wrangler kv namespace
+  create`, `wrangler secret put GEMINI_API_KEY`, `wrangler deploy`),
+  paste the resulting URL into Settings → Signals backend.
+- Telegram bot integration for push notifications when the daily scan
+  surfaces a strong signal.
+- CSV import from broker exports.
+- Equity curve and per-symbol breakdown on the stats dashboard.
+
 ## 2026-04-21 — Session 4: GitHub Pages live + Phase 2 AI (Gemini)
 
 ### Deployed
@@ -39,10 +88,10 @@ Claude API has no free tier; Gemini's free tier (15 req/min, 1500 req/day on `ge
 
 ### Not yet done
 
-- Ticker autocomplete (user asked for a built-in symbol catalog so typing "app" suggests AAPL).
+- ~~Ticker autocomplete~~ — done in Session 5.
 - Weekly summary / multi-trade analysis.
-- Phase 3 — X signal ingestion (architecture TBD for pure PWA; likely manual paste + AI parse).
-- Remove legacy `LifeTracker.WPF` once PWA is confirmed stable on device.
+- ~~Phase 3 — X signal ingestion~~ — done in Session 5 (Signals scan).
+- ~~Remove legacy `LifeTracker.WPF`~~ — done in Session 5.
 
 ## 2026-04-20 — Session 3: Blazor PWA pivot
 
