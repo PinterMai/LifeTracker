@@ -8,7 +8,10 @@
 
 <div class="trades-header">
     <h1>Trades</h1>
-    <button class="btn btn-primary" @onclick="@(() => Nav.NavigateTo("trades/new"))">+ New trade</button>
+    <div class="trades-actions">
+        <button class="btn btn-secondary" @onclick="@(() => Nav.NavigateTo("trades/import"))">Import</button>
+        <button class="btn btn-primary" @onclick="@(() => Nav.NavigateTo("trades/new"))">+ New trade</button>
+    </div>
 </div>
 
 @if (_trades is null)
@@ -88,6 +91,11 @@ else
         justify-content: space-between;
         align-items: center;
         margin-bottom: 1rem;
+    }
+
+    .trades-actions {
+        display: flex;
+        gap: 0.5rem;
     }
 
     .stats-row {

@@ -30,6 +30,12 @@ public class TradeRepository : ITradeRepository
         await _context.SaveChangesAsync();
     }
 
+    public async Task AddRangeAsync(IEnumerable<Trade> trades)
+    {
+        await _context.Trades.AddRangeAsync(trades);
+        await _context.SaveChangesAsync();
+    }
+
     public async Task UpdateAsync(Trade trade)
     {
         _context.Trades.Update(trade);

@@ -28,6 +28,14 @@ public sealed class PersistingTradeRepository : ITradeRepository
         await _persistence.FlushAsync();
     }
 
+    public async Task AddRangeAsync(IEnumerable<Trade> trades)
+    {
+        await _inner.AddRangeAsync(trades);
+        // Single flush regardless of batch size — that's the whole point
+        // of having AddRangeAsync. Flushing per-row would defeat it.
+        await _persistence.FlushAsync();
+    }
+
     public async Task UpdateAsync(Trade trade)
     {
         await _inner.UpdateAsync(trade);

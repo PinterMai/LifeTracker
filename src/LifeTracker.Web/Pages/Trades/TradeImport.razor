@@ -1,0 +1,437 @@
+@page "/trades/import"
+@using System.Text
+@using LifeTracker.Core.Interfaces
+@using LifeTracker.Core.Models
+@using LifeTracker.Core.Services
+@using Microsoft.AspNetCore.Components.Forms
+@inject ITradeRepository Repository
+@inject NavigationManager Nav
+
+<PageTitle>Import trades</PageTitle>
+
+<div class="import-page">
+    <div class="page-header">
+        <h1>Import trades</h1>
+        <p class="muted">
+            Bulk-load past trades from a spreadsheet or broker export. Paste
+            CSV below or upload a file. The first row must be a header line —
+            column order is up to you, but the names have to match.
+        </p>
+    </div>
+
+    <section class="card">
+        <h2>Format</h2>
+        <p class="muted">
+            <strong>Required:</strong> Ticker, Direction (Long/Short),
+            AmountInvested, OpenPrice, ClosePrice<br />
+            <strong>Optional:</strong> OpenedAt (YYYY-MM-DD, defaults to today),
+            Notes
+        </p>
+        <pre class="example"><code>@_template</code></pre>
+        <div class="form-actions">
+            <button class="btn btn-secondary" @onclick="DownloadTemplateAsync">
+                Download template
+            </button>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>Paste or upload</h2>
+
+        <div class="form-row">
+            <label>CSV text</label>
+            <textarea class="form-control mono" rows="8" @bind="_csv"
+                      placeholder="Paste CSV here…"></textarea>
+        </div>
+
+        <div class="form-row">
+            <label>Or upload a .csv file</label>
+            <InputFile OnChange="OnFilePicked" accept=".csv,text/csv" />
+        </div>
+
+        <div class="form-actions">
+            <button class="btn btn-primary" @onclick="ParseAsync"
+                    disabled="@(_isBusy || string.IsNullOrWhiteSpace(_csv))">
+                Parse
+            </button>
+            @if (_parsed is not null)
+            {
+                <button class="btn btn-primary"
+                        @onclick="ImportAsync"
+                        disabled="@(_isBusy || !_parsed.Trades.Any() || _parsed.HasFatalErrors)">
+                    @(_isBusy ? "Importing…" : $"Import {_parsed.Trades.Count()} trade(s)")
+                </button>
+            }
+            <button class="btn btn-secondary" @onclick="ResetAsync" disabled="@_isBusy">
+                Clear
+            </button>
+        </div>
+
+        @if (_status is not null)
+        {
+            <div class="status @_statusKind">@_status</div>
+        }
+    </section>
+
+    @if (_parsed is not null)
+    {
+        @if (_parsed.HasFatalErrors)
+        {
+            <section class="card">
+                <h2>Header errors</h2>
+                <ul class="errors">
+                    @foreach (var err in _parsed.HeaderErrors)
+                    {
+                        <li>@err</li>
+                    }
+                </ul>
+                <p class="hint">Fix the header line and click Parse again.</p>
+            </section>
+        }
+
+        @if (_parsed.Errors.Any())
+        {
+            <section class="card">
+                <h2>Row errors (@_parsed.Errors.Count())</h2>
+                <p class="muted">
+                    These rows were skipped. Fix them in the source and re-paste,
+                    or import the valid rows now and add the rest manually later.
+                </p>
+                <table class="errors-table">
+                    <thead>
+                        <tr>
+                            <th>Line</th>
+                            <th>Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var e in _parsed.Errors)
+                        {
+                            <tr>
+                                <td>@e.LineNumber</td>
+                                <td>@e.Error</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </section>
+        }
+
+        @if (_parsed.Trades.Any())
+        {
+            <section class="card">
+                <h2>Preview (@_parsed.Trades.Count())</h2>
+                <table class="preview-table">
+                    <thead>
+                        <tr>
+                            <th>Ticker</th>
+                            <th>Dir</th>
+                            <th>Amount</th>
+                            <th>Open</th>
+                            <th>Close</th>
+                            <th>Date</th>
+                            <th>P/L %</th>
+                            <th>Notes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var t in _parsed.Trades)
+                        {
+                            <tr>
+                                <td><strong>@t.Ticker</strong></td>
+                                <td>
+                                    <span class="badge @(t.Direction == Direction.Long ? "badge-long" : "badge-short")">
+                                        @t.Direction
+                                    </span>
+                                </td>
+                                <td>@t.AmountInvested.ToString("0.##")</td>
+                                <td>@t.OpenPrice.ToString("0.####")</td>
+                                <td>@t.ClosePrice.ToString("0.####")</td>
+                                <td>@t.OpenedAt.ToString("yyyy-MM-dd")</td>
+                                <td class="@(t.ProfitLossPercent >= 0 ? "positive" : "negative")">
+                                    @(t.ProfitLossPercent >= 0 ? "+" : "")@t.ProfitLossPercent.ToString("0.00")%
+                                </td>
+                                <td class="notes">@(string.IsNullOrEmpty(t.Notes) ? "—" : t.Notes)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </section>
+        }
+    }
+</div>
+
+@code {
+    // Kept as a const-ish field so it can both render in <pre> and feed
+    // DownloadTemplateAsync without duplicating the body.
+    private readonly string _template =
+        "Ticker,Direction,AmountInvested,OpenPrice,ClosePrice,OpenedAt,Notes\n" +
+        "AAPL,Long,1000,150.50,165.20,2026-01-15,Earnings play\n" +
+        "TSLA,Short,500,250.00,230.50,2026-02-03,\"Bear flag, broke support\"\n";
+
+    private string _csv = string.Empty;
+    private CsvTradeParser.ParseResult? _parsed;
+    private bool _isBusy;
+    private string? _status;
+    private string _statusKind = "info";
+
+    private async Task OnFilePicked(InputFileChangeEventArgs e)
+    {
+        try
+        {
+            // 5 MB cap — anything bigger is almost certainly the wrong
+            // file, and the textarea preview would be unusable anyway.
+            using var stream = e.File.OpenReadStream(maxAllowedSize: 5 * 1024 * 1024);
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+            _csv = await reader.ReadToEndAsync();
+            Show($"Loaded {e.File.Name} ({e.File.Size:N0} bytes). Click Parse.", "info");
+            _parsed = null;
+        }
+        catch (Exception ex)
+        {
+            Show($"Failed to read file: {ex.Message}", "error");
+        }
+    }
+
+    private void ParseAsync()
+    {
+        _isBusy = true;
+        try
+        {
+            _parsed = CsvTradeParser.Parse(_csv);
+
+            if (_parsed.HasFatalErrors)
+            {
+                Show("Header has problems — see below.", "error");
+            }
+            else
+            {
+                var ok = _parsed.Trades.Count();
+                var bad = _parsed.Errors.Count();
+                Show(
+                    bad == 0
+                        ? $"Parsed {ok} trade(s). Review and click Import."
+                        : $"Parsed {ok} trade(s) and skipped {bad} bad row(s). Review below.",
+                    bad == 0 ? "success" : "info");
+            }
+        }
+        catch (Exception ex)
+        {
+            Show(ex.Message, "error");
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private async Task ImportAsync()
+    {
+        if (_parsed is null) return;
+
+        _isBusy = true;
+        Show("Importing…", "info");
+        try
+        {
+            // ToList() materialises so AddRangeAsync doesn't iterate the
+            // LINQ query a second time when it asks the count later.
+            var batch = _parsed.Trades.ToList();
+            await Repository.AddRangeAsync(batch);
+            Show($"Imported {batch.Count} trade(s).", "success");
+
+            // Bounce the user to the list so they can see what landed —
+            // a half-second pause keeps the success toast readable.
+            await Task.Delay(600);
+            Nav.NavigateTo("trades");
+        }
+        catch (Exception ex)
+        {
+            Show($"Import failed: {ex.Message}", "error");
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private Task ResetAsync()
+    {
+        _csv = string.Empty;
+        _parsed = null;
+        _status = null;
+        return Task.CompletedTask;
+    }
+
+    private async Task DownloadTemplateAsync()
+    {
+        // Browsers won't let us trigger a save dialog from C# directly.
+        // Easiest cross-platform path: copy to clipboard via JS interop?
+        // We don't have IJSRuntime injected for that and it adds churn.
+        // Instead we just copy the template into the textarea so the
+        // user can edit + paste — same end result, no platform fuss.
+        _csv = _template;
+        Show("Template loaded into the box. Edit and click Parse.", "info");
+        await Task.CompletedTask;
+    }
+
+    private void Show(string msg, string kind)
+    {
+        _status = msg;
+        _statusKind = kind;
+    }
+}
+
+<style>
+    .import-page {
+        padding: 1.5rem;
+        max-width: 900px;
+        margin: 0 auto;
+    }
+
+    .page-header h1 { margin: 0 0 0.4rem 0; }
+
+    .card {
+        background: #1f2328;
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin-bottom: 1rem;
+    }
+
+    .card h2 {
+        margin-top: 0;
+        margin-bottom: 0.5rem;
+    }
+
+    .muted { color: #a0a0b0; }
+
+    .form-row { margin-bottom: 1rem; }
+
+    .form-row label {
+        display: block;
+        font-size: 0.85rem;
+        color: #a0a0b0;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 0.3rem;
+    }
+
+    .form-control {
+        background: #14161a;
+        border: 1px solid #2a2f36;
+        color: #f0f0f5;
+        border-radius: 8px;
+        padding: 0.6rem 0.75rem;
+        width: 100%;
+    }
+
+    .form-control.mono {
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+        font-size: 0.85rem;
+    }
+
+    .form-control:focus { border-color: #4ade80; outline: none; }
+
+    .form-actions {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        margin-top: 1rem;
+    }
+
+    .btn {
+        padding: 0.6rem 1rem;
+        border-radius: 8px;
+        font-weight: 600;
+        cursor: pointer;
+        border: 1px solid transparent;
+    }
+
+    .btn-primary {
+        background: #4ade80;
+        color: #052e16;
+        border-color: #4ade80;
+    }
+
+    .btn-secondary {
+        background: transparent;
+        color: #f0f0f5;
+        border-color: #2a2f36;
+    }
+
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    .status {
+        margin-top: 1rem;
+        padding: 0.75rem 1rem;
+        border-radius: 8px;
+        font-size: 0.9rem;
+    }
+
+    .status.success { background: #14532d; color: #4ade80; }
+    .status.error { background: #7f1d1d; color: #f87171; }
+    .status.info { background: #1e3a5f; color: #93c5fd; }
+
+    .example {
+        background: #14161a;
+        border-radius: 8px;
+        padding: 0.75rem 1rem;
+        font-size: 0.8rem;
+        color: #d0d0d8;
+        overflow-x: auto;
+        margin: 0.5rem 0 1rem 0;
+    }
+
+    .errors {
+        margin: 0.5rem 0 0 1.2rem;
+        color: #f87171;
+    }
+
+    .errors-table, .preview-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.85rem;
+    }
+
+    .errors-table th, .preview-table th,
+    .errors-table td, .preview-table td {
+        text-align: left;
+        padding: 0.5rem 0.6rem;
+        border-bottom: 1px solid #2a2f36;
+    }
+
+    .errors-table th, .preview-table th {
+        color: #a0a0b0;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+    }
+
+    .preview-table .notes {
+        color: #c0c0c8;
+        max-width: 18rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .badge {
+        display: inline-block;
+        padding: 0.15rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.7rem;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+    }
+
+    .badge-long { background: #14532d; color: #4ade80; }
+    .badge-short { background: #7f1d1d; color: #f87171; }
+
+    .positive { color: #4ade80; }
+    .negative { color: #f87171; }
+
+    .hint {
+        font-size: 0.8rem;
+        color: #8a8a99;
+        margin: 0.5rem 0 0 0;
+    }
+</style>
