@@ -48,10 +48,12 @@ npx wrangler secret put GEMINI_API_KEY
 # 5. (optional) set a shared secret for the manual scan trigger
 npx wrangler secret put SCAN_TRIGGER_SECRET
 
-# 6. (optional) edit HANDLES in wrangler.toml [vars] if your trusted
+# 6. (optional) wire up Telegram push notifications, see section below
+
+# 7. (optional) edit HANDLES in wrangler.toml [vars] if your trusted
 #    list changed since this README was written
 
-# 7. deploy
+# 8. deploy
 npx wrangler deploy
 ```
 
@@ -84,3 +86,37 @@ success or the Gemini error body on failure.
 Edit the `HANDLES` value in `wrangler.toml` (comma-separated, no `@`),
 then `npx wrangler deploy`. Settings UI in the app no longer feeds the
 worker — the worker is the source of truth for the cron's input.
+
+## Telegram push notifications (optional)
+
+When the cron finds at least one **Long** or **Short** recommendation,
+the worker can fire a one-shot Telegram message to your phone. No
+LifeTracker account, no polling — pure push.
+
+### Setup
+
+1. Open Telegram, message **@BotFather**, send `/newbot`, follow the
+   prompts. Save the `123456:ABC…` token it gives you.
+2. Send `/start` (or any message) to your new bot from your own
+   Telegram account so it has permission to message you back.
+3. Get your chat id by visiting:
+   ```
+   https://api.telegram.org/bot<TOKEN>/getUpdates
+   ```
+   Find `"chat":{"id":<NUMBER>` — that number is your `TELEGRAM_CHAT_ID`.
+4. Set both as worker secrets:
+   ```bash
+   npx wrangler secret put TELEGRAM_BOT_TOKEN
+   npx wrangler secret put TELEGRAM_CHAT_ID
+   npx wrangler deploy
+   ```
+
+### Test it
+
+```bash
+curl -X POST "https://<your-url>/signals/scan?key=<SCAN_TRIGGER_SECRET>"
+```
+
+If the scan produces a Long or Short rec, your phone will buzz within a
+few seconds. Watch/Avoid recs are intentionally silent — they're noise,
+not action.

@@ -10,6 +10,7 @@
 // pages.github.io can read them straight from the browser.
 
 import { DEFAULT_MODEL, scanSignals } from './gemini';
+import { sendTelegramAlert, shouldNotify } from './telegram';
 import type { CachedScan } from './types';
 
 interface Env {
@@ -19,6 +20,10 @@ interface Env {
   HANDLES: string;
   ALLOWED_ORIGIN?: string;
   SCAN_TRIGGER_SECRET?: string;
+  // Optional Telegram bot push. Both must be set to fire alerts; either
+  // missing means "skip the push silently."
+  TELEGRAM_BOT_TOKEN?: string;
+  TELEGRAM_CHAT_ID?: string;
 }
 
 const KV_KEY = 'signals:latest';
@@ -60,9 +65,12 @@ export default {
         return jsonResponse({ error: 'unauthorized' }, 401, cors);
       }
 
-      // Fire and wait so the caller can see the result inline.
+      // Fire and wait so the caller can see the result inline. Also
+      // exercise the Telegram path so manual triggers double as a setup
+      // smoke test ("does my bot push actually arrive?").
       try {
         const cached = await runScan(env);
+        ctx.waitUntil(maybeNotify(env, cached));
         return jsonResponse(cached, 200, cors);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -75,13 +83,16 @@ export default {
 
   async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     // ctx.waitUntil keeps the worker alive past the handler return so
-    // the async scan + KV write can complete.
+    // the async scan + KV write + Telegram push can complete.
     ctx.waitUntil(
       runScan(env)
-        .then((c) => console.log(
-          `Cron scan complete. ${c.recommendations.length} recs, ` +
-          `${c.rawSignals.length} raw signals, model=${c.model}`,
-        ))
+        .then(async (c) => {
+          console.log(
+            `Cron scan complete. ${c.recommendations.length} recs, ` +
+              `${c.rawSignals.length} raw signals, model=${c.model}`,
+          );
+          await maybeNotify(env, c);
+        })
         .catch((err) => console.error('Cron scan failed:', err)),
     );
   },
@@ -112,6 +123,25 @@ async function runScan(env: Env): Promise<CachedScan> {
 
   await env.SIGNALS.put(KV_KEY, JSON.stringify(cached));
   return cached;
+}
+
+/**
+ * Fires a Telegram message when both the bot token and chat id are
+ * configured AND the scan produced a Long/Short rec. Wrapped in a
+ * try/catch inside the helper, so a Telegram failure never blocks the
+ * KV write or the cron exit code.
+ */
+async function maybeNotify(env: Env, cached: CachedScan): Promise<void> {
+  if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return;
+  if (!shouldNotify(cached)) {
+    console.log('Skipping Telegram push: no Long/Short recs.');
+    return;
+  }
+  await sendTelegramAlert(cached, {
+    botToken: env.TELEGRAM_BOT_TOKEN,
+    chatId: env.TELEGRAM_CHAT_ID,
+  });
+  console.log('Telegram push sent.');
 }
 
 function parseHandles(raw: string | undefined): string[] {

@@ -38,3 +38,10 @@ GEMINI_MODEL = "gemini-flash-latest"
 # GEMINI_API_KEY      required    Google AI Studio key for grounded calls
 # SCAN_TRIGGER_SECRET optional    if set, POST /signals/scan?key=<this>
 #                                 forces a fresh scan (handy for debugging)
+# TELEGRAM_BOT_TOKEN  optional    if both this AND TELEGRAM_CHAT_ID are
+# TELEGRAM_CHAT_ID    optional    set, the cron pushes a summary message
+#                                 whenever the scan produces a Long/Short
+#                                 recommendation. Get the token from
+#                                 @BotFather; get the chat id by sending
+#                                 /start to your bot then GET-ing
+#                                 https://api.telegram.org/bot<TOKEN>/getUpdates

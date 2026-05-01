@@ -21,6 +21,9 @@ All notable user-facing changes go here. Dates are ISO 8601.
 - **Signals backend (Cloudflare Worker)** — optional. When configured in
   Settings, a worker runs the daily scan with its own Gemini key and the
   browser just reads the cached snapshot. Keeps your local quota free.
+- **Telegram push notifications** — optional add-on to the Worker. When
+  the cron produces a Long/Short rec, the worker pings your Telegram bot
+  so you get a phone notification without opening the app.
 
 ### Changed
 
