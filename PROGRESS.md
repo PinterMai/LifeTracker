@@ -1,5 +1,58 @@
 # Progress log
 
+## 2026-05-04 — Session 6: Telegram push + CSV import + Stats dashboard
+
+### Built
+
+- **Telegram push** (`workers/signals/src/telegram.ts`)
+  - Optional add-on to the daily cron. When `TELEGRAM_BOT_TOKEN` and
+    `TELEGRAM_CHAT_ID` are both set as worker secrets, the cron pushes
+    a single formatted message to Telegram for any scan that produced
+    a Long or Short rec. Watch/Avoid stay silent on purpose so the user
+    doesn't get desensitised to the buzz.
+  - Errors caught + logged inside `sendTelegramAlert` — a Telegram
+    outage can't poison the KV write.
+  - Manual `/signals/scan` trigger also fires the push, so it doubles
+    as a setup smoke test.
+
+- **CSV trade import** (`Pages/Trades/TradeImport.razor`)
+  - Header-driven parser in Core (`CsvTradeParser`). Required:
+    Ticker/Direction/AmountInvested/OpenPrice/ClosePrice. Optional:
+    OpenedAt (defaults to today), Notes. Column order is up to the user.
+  - Tolerates EU number formats — `"150,50"` parses the same as
+    `"150.50"`, and both `"1,234.56"` and `"1.234,56"` resolve correctly.
+  - RFC-4180-style quoted fields, so notes with commas survive.
+  - Per-row errors are surfaced in a separate table rather than killing
+    the batch. The user can choose to import only the valid rows.
+  - New `AddRangeAsync` on `ITradeRepository` so a 100-row import
+    triggers a single IndexedDB flush instead of 100 round-trips.
+
+- **Stats dashboard** (`Pages/Stats.razor`)
+  - KPI strip: total trades, win rate, total $ P/L, average per trade,
+    best, worst, profit factor.
+  - Hand-rolled SVG equity curve (no charting library — keeps the WASM
+    bundle small + dark-theme friendly). Buckets by day, includes a
+    zero-baseline guide and an endpoint dot.
+  - Monthly P/L bars (green/red, sized vs the strongest month).
+  - Per-symbol table sorted by total $ P/L descending.
+  - Pure aggregation in `Core/Services/PortfolioStats` so it's testable.
+
+### Verified
+
+- `dotnet build` — 0 errors, 0 warnings.
+- `dotnet test` — 51/51 passing (was 30; +14 CSV parser, +7 stats).
+
+### Not yet done
+
+- User-side: deploy the worker (`wrangler login`, KV namespace,
+  `GEMINI_API_KEY` secret, optional Telegram secrets, deploy), paste
+  the URL into Settings → Signals backend.
+- Multi-trade weekly summary (one Gemini call rolling up the past
+  N closed trades into a coaching paragraph).
+- Drawdown highlight on the equity curve (mark the deepest peak-to-
+  trough span).
+- Filter the Trades list by date range / symbol / outcome.
+
 ## 2026-04-27 — Session 5: Signals + Worker backend, WPF cleanup
 
 ### Built
