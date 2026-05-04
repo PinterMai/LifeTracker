@@ -32,6 +32,17 @@ public interface IAiService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Coaching-style summary of the user's recent trades — patterns,
+    /// leaks, one concrete next-week adjustment. Window length is up to
+    /// the caller; the prompt asks the model to act on what's there
+    /// rather than complain about thin data.
+    /// </summary>
+    Task<AiAnalysis> SummarizeWeeklyAsync(
+        IReadOnlyList<Trade> recentTrades,
+        int windowDays = 7,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Cheap round-trip to verify the stored API key works.
     /// </summary>
     Task<bool> TestConnectionAsync(CancellationToken cancellationToken = default);

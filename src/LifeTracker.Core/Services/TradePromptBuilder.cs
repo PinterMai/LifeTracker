@@ -121,4 +121,66 @@ public static class TradePromptBuilder
             + $"{t.OpenPrice:0.##}->{t.ClosePrice:0.##} "
             + $"{t.ProfitLossPercent:+0.00;-0.00;0}%");
     }
+
+    /// <summary>
+    /// Build a prompt asking the model to summarise a window of recent
+    /// trades — patterns, leaks, what's working, one concrete next-week
+    /// adjustment. Used by the Stats page's "Weekly summary" card.
+    /// </summary>
+    public static string BuildWeeklySummaryPrompt(
+        IReadOnlyList<Trade> recent,
+        int days = 7)
+    {
+        ArgumentNullException.ThrowIfNull(recent);
+        if (days <= 0) days = 7;
+
+        var culture = CultureInfo.InvariantCulture;
+        var sb = new StringBuilder();
+        sb.AppendLine(culture,
+            $"Review this trader's last {days} days of trades and summarise.");
+        sb.AppendLine();
+
+        if (recent.Count == 0)
+        {
+            sb.AppendLine(culture,
+                $"(no trades closed in the last {days} days)");
+            sb.AppendLine();
+            sb.AppendLine("Tell the user briefly that there's nothing to review and "
+                + "suggest one journaling habit they could adopt while they wait "
+                + "for the next setup.");
+            return sb.ToString();
+        }
+
+        // Aggregate up front so the model doesn't have to count rows
+        // itself — reduces hallucination on basic arithmetic.
+        var wins = recent.Count(t => t.ProfitLossPercent > 0);
+        var losses = recent.Count(t => t.ProfitLossPercent < 0);
+        var totalPctSum = recent.Sum(t => t.ProfitLossPercent);
+        var totalDollar = recent.Sum(t => t.AmountInvested * (t.ProfitLossPercent / 100m));
+
+        sb.AppendLine(culture, $"== Snapshot ==");
+        sb.AppendLine(culture, $"Trades: {recent.Count} ({wins} wins, {losses} losses)");
+        sb.AppendLine(culture, $"Sum of P/L %: {totalPctSum:+0.00;-0.00;0}%");
+        sb.AppendLine(culture, $"Net dollar P/L: {totalDollar:+0.##;-0.##;0}");
+        sb.AppendLine();
+
+        sb.AppendLine(culture, $"== Trades (newest first) ==");
+        foreach (var t in recent.OrderByDescending(t => t.OpenedAt))
+        {
+            AppendTradeOneLine(sb, t);
+            if (!string.IsNullOrWhiteSpace(t.Notes))
+            {
+                sb.AppendLine(culture, $"    notes: {t.Notes.Trim()}");
+            }
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("Give the user, in plain prose under 250 words:");
+        sb.AppendLine("1. What pattern is showing up across these trades (setups, sizing, time-of-day, ticker concentration).");
+        sb.AppendLine("2. The most expensive recurring mistake — be specific, cite a row by date+ticker.");
+        sb.AppendLine("3. One concrete adjustment for next week, grounded in this data.");
+        sb.AppendLine("Skip the generic disclaimers. No bullet lists.");
+
+        return sb.ToString();
+    }
 }

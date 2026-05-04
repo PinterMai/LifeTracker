@@ -30,6 +30,9 @@ All notable user-facing changes go here. Dates are ISO 8601.
 - **Stats page** — `/stats` shows headline KPIs (win rate, total P/L,
   best/worst, profit factor), a hand-rolled SVG equity curve, monthly
   P/L bars, and a per-symbol breakdown.
+- **AI weekly summary** on the Stats page — picks 7/14/30-day window,
+  sends recent trades + notes to Gemini, returns a coaching paragraph
+  about patterns + one concrete next-week adjustment.
 
 ### Changed
 

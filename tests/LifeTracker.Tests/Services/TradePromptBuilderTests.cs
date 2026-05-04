@@ -135,6 +135,64 @@ public class TradePromptBuilderTests
         Assert.DoesNotContain("Trusted X accounts", emptyHandles);
     }
 
+    [Fact]
+    public void BuildWeeklySummaryPrompt_NoTrades_AsksForJournalingTip()
+    {
+        var prompt = TradePromptBuilder.BuildWeeklySummaryPrompt(
+            Array.Empty<Trade>(), days: 7);
+
+        Assert.Contains("no trades closed", prompt);
+        Assert.Contains("journaling habit", prompt);
+    }
+
+    [Fact]
+    public void BuildWeeklySummaryPrompt_IncludesAggregatesAndRows()
+    {
+        var trades = new[]
+        {
+            new Trade
+            {
+                Ticker = "AAPL",
+                Direction = Direction.Long,
+                AmountInvested = 1000m,
+                OpenPrice = 100m,
+                ClosePrice = 110m,
+                OpenedAt = new DateTime(2026, 5, 1),
+                Notes = "earnings beat"
+            },
+            new Trade
+            {
+                Ticker = "TSLA",
+                Direction = Direction.Short,
+                AmountInvested = 500m,
+                OpenPrice = 250m,
+                ClosePrice = 260m,
+                OpenedAt = new DateTime(2026, 5, 2),
+            },
+        };
+
+        var prompt = TradePromptBuilder.BuildWeeklySummaryPrompt(trades, days: 7);
+
+        // Aggregate snapshot pre-computed so the model doesn't have to:
+        Assert.Contains("Trades: 2 (1 wins, 1 losses)", prompt);
+        // Both rows present, newest first (TSLA on 5-2 before AAPL on 5-1):
+        var idxTsla = prompt.IndexOf("TSLA", StringComparison.Ordinal);
+        var idxAapl = prompt.IndexOf("AAPL", StringComparison.Ordinal);
+        Assert.True(idxTsla > 0 && idxAapl > 0);
+        Assert.True(idxTsla < idxAapl, "Trades should be ordered newest first");
+        // Notes are included only when present:
+        Assert.Contains("earnings beat", prompt);
+    }
+
+    [Fact]
+    public void BuildWeeklySummaryPrompt_DefaultsTo7DaysWhenInvalid()
+    {
+        var prompt = TradePromptBuilder.BuildWeeklySummaryPrompt(
+            Array.Empty<Trade>(), days: 0);
+
+        Assert.Contains("last 7 days", prompt);
+    }
+
     private static IEnumerable<int> FindAll(string haystack, string needle)
     {
         var idx = 0;

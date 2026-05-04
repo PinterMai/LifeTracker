@@ -242,6 +242,39 @@ public sealed class GeminiAiService : IAiService
         return list;
     }
 
+    public async Task<AiAnalysis> SummarizeWeeklyAsync(
+        IReadOnlyList<Trade> recentTrades,
+        int windowDays = 7,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(recentTrades);
+
+        var (apiKey, model) = await GetKeyAndModelAsync(cancellationToken).ConfigureAwait(false);
+        var prompt = TradePromptBuilder.BuildWeeklySummaryPrompt(recentTrades, windowDays);
+
+        // Weekly summary is reflective coaching on the user's own data —
+        // there's nothing the web can add, so we skip the google_search
+        // tool. Saves quota and avoids the model padding the answer with
+        // unrelated headlines.
+        var request = new GeminiRequest(
+            SystemInstruction: new GeminiContent(new[] { new GeminiPart(TradePromptBuilder.SystemInstruction) }),
+            Contents: new[] { new GeminiContent(new[] { new GeminiPart(prompt) }) });
+
+        var response = await PostAsync(apiKey, model, request, cancellationToken).ConfigureAwait(false);
+
+        var candidate = response?.Candidates?.FirstOrDefault();
+        var text = candidate?.Content?.Parts is { Count: > 0 } parts
+            ? string.Concat(parts.Select(p => p.Text ?? string.Empty)).Trim()
+            : "(empty response)";
+
+        return new AiAnalysis(
+            Text: string.IsNullOrWhiteSpace(text) ? "(empty response)" : text,
+            InputTokens: response?.UsageMetadata?.PromptTokenCount ?? 0,
+            OutputTokens: response?.UsageMetadata?.CandidatesTokenCount ?? 0,
+            Model: model,
+            Citations: Array.Empty<AiCitation>());
+    }
+
     public async Task<bool> TestConnectionAsync(CancellationToken cancellationToken = default)
     {
         try

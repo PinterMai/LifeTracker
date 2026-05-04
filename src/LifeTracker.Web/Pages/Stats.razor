@@ -4,6 +4,7 @@
 @using LifeTracker.Core.Models
 @using LifeTracker.Core.Services
 @inject ITradeRepository Repository
+@inject IAiService Ai
 
 <PageTitle>Stats</PageTitle>
 
@@ -105,6 +106,46 @@
             </section>
         }
 
+        <section class="card">
+            <h2>AI weekly summary</h2>
+            <p class="muted">
+                Coaching read on the trades you closed in the last
+                <select @bind="_summaryWindowDays" class="inline-select" disabled="@_isSummarizing">
+                    <option value="7">7 days</option>
+                    <option value="14">14 days</option>
+                    <option value="30">30 days</option>
+                </select>.
+                Sends the trades + their notes to Gemini; uses the API key
+                configured in Settings.
+            </p>
+
+            <div class="form-actions">
+                <button class="btn btn-primary"
+                        @onclick="GenerateSummaryAsync"
+                        disabled="@_isSummarizing">
+                    @(_isSummarizing ? "Thinking…" : "Generate summary")
+                </button>
+            </div>
+
+            @if (_summaryError is not null)
+            {
+                <div class="status error">@_summaryError</div>
+            }
+
+            @if (_summary is not null)
+            {
+                <div class="summary-body">
+                    @foreach (var para in SplitParagraphs(_summary.Text))
+                    {
+                        <p>@para</p>
+                    }
+                </div>
+                <div class="summary-meta muted">
+                    @_summary.Model · @_summary.InputTokens in / @_summary.OutputTokens out
+                </div>
+            }
+        </section>
+
         @if (_perSymbol is { Count: > 0 })
         {
             <section class="card">
@@ -142,6 +183,14 @@
     private IReadOnlyList<PortfolioStats.SymbolStats>? _perSymbol;
     private IReadOnlyList<PortfolioStats.MonthlyStats>? _monthly;
 
+    // Weekly summary state. Kept on this component so navigating away
+    // and back resets it (the user gets a fresh snapshot rather than a
+    // stale one based on trades they may have edited).
+    private int _summaryWindowDays = 7;
+    private bool _isSummarizing;
+    private AiAnalysis? _summary;
+    private string? _summaryError;
+
     protected override async Task OnInitializedAsync()
     {
         var all = await Repository.GetAllAsync();
@@ -163,6 +212,62 @@
     {
         var sign = value > 0 ? "+" : "";
         return $"{sign}{value.ToString("0.##", CultureInfo.InvariantCulture)} $";
+    }
+
+    private async Task GenerateSummaryAsync()
+    {
+        if (_trades is null) return;
+
+        _isSummarizing = true;
+        _summaryError = null;
+        _summary = null;
+        StateHasChanged();
+
+        try
+        {
+            // Cutoff is "midnight N days ago" so trades closed today
+            // count as part of "the last 7 days" rather than only the
+            // exact last 168 hours.
+            var cutoff = DateTime.Now.Date.AddDays(-_summaryWindowDays);
+            var window = _trades
+                .Where(t => t.OpenedAt >= cutoff)
+                .OrderByDescending(t => t.OpenedAt)
+                .ToList();
+
+            _summary = await Ai.SummarizeWeeklyAsync(window, _summaryWindowDays);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Most common: API key missing in Settings. Surface the
+            // exception text directly — it already explains the fix.
+            _summaryError = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            _summaryError = $"Summary failed: {ex.Message}";
+        }
+        finally
+        {
+            _isSummarizing = false;
+        }
+    }
+
+    /// <summary>
+    /// Splits the model's prose on blank lines so we can wrap each
+    /// paragraph in its own &lt;p&gt; — Razor doesn't preserve newlines
+    /// otherwise.
+    /// </summary>
+    private static IEnumerable<string> SplitParagraphs(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) yield break;
+
+        var normalized = text.Replace("\r\n", "\n").Replace("\r", "\n").Trim();
+        foreach (var chunk in normalized.Split("\n\n", StringSplitOptions.RemoveEmptyEntries))
+        {
+            // Collapse single newlines inside a paragraph to spaces so
+            // soft-wrapped output doesn't render as awkward line breaks.
+            yield return chunk.Replace("\n", " ").Trim();
+        }
     }
 
     /// <summary>
@@ -439,4 +544,54 @@
         text-transform: uppercase;
         letter-spacing: 0.4px;
     }
+
+    /* --- AI weekly summary --------------------------------------- */
+
+    .inline-select {
+        background: #14161a;
+        color: #f0f0f5;
+        border: 1px solid #2a2f36;
+        border-radius: 6px;
+        padding: 0.15rem 0.35rem;
+        margin: 0 0.2rem;
+    }
+
+    .form-actions {
+        display: flex;
+        gap: 0.5rem;
+        margin: 0.75rem 0 0.25rem 0;
+    }
+
+    .btn {
+        padding: 0.55rem 1rem;
+        border-radius: 8px;
+        font-weight: 600;
+        cursor: pointer;
+        border: 1px solid transparent;
+    }
+
+    .btn-primary {
+        background: #4ade80;
+        color: #052e16;
+        border-color: #4ade80;
+    }
+
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    .summary-body {
+        margin-top: 0.75rem;
+        line-height: 1.55;
+        color: #e5e7eb;
+    }
+
+    .summary-body p {
+        margin: 0 0 0.75rem 0;
+    }
+
+    .summary-meta {
+        font-size: 0.75rem;
+        margin-top: 0.5rem;
+    }
+
+    .status.error { background: #7f1d1d; color: #f87171; padding: 0.6rem 0.85rem; border-radius: 8px; margin-top: 0.75rem; }
 </style>
