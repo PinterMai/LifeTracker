@@ -1,0 +1,442 @@
+@page "/stats"
+@using System.Globalization
+@using LifeTracker.Core.Interfaces
+@using LifeTracker.Core.Models
+@using LifeTracker.Core.Services
+@inject ITradeRepository Repository
+
+<PageTitle>Stats</PageTitle>
+
+<div class="stats-page">
+    <div class="page-header">
+        <h1>Stats</h1>
+        <p class="muted">
+            Aggregated view of every closed trade. Numbers come straight from
+            your local IndexedDB — nothing leaves the browser.
+        </p>
+    </div>
+
+    @if (_trades is null)
+    {
+        <div class="status info">Loading…</div>
+    }
+    else if (_trades.Count == 0)
+    {
+        <div class="empty-state">
+            <p>No trades to summarise yet. Log a few or import a CSV first.</p>
+        </div>
+    }
+    else
+    {
+        var kpi = _kpi!;
+        <section class="kpi-grid">
+            <div class="kpi">
+                <div class="kpi-label">Total trades</div>
+                <div class="kpi-value">@kpi.TotalTrades</div>
+            </div>
+            <div class="kpi">
+                <div class="kpi-label">Win rate</div>
+                <div class="kpi-value">@kpi.WinRatePercent.ToString("0.0")%</div>
+                <div class="kpi-sub">@kpi.Wins W · @kpi.Losses L · @kpi.BreakEven BE</div>
+            </div>
+            <div class="kpi">
+                <div class="kpi-label">Total P/L</div>
+                <div class="kpi-value @PlClass(kpi.TotalProfitLoss)">
+                    @FormatMoney(kpi.TotalProfitLoss)
+                </div>
+            </div>
+            <div class="kpi">
+                <div class="kpi-label">Avg / trade</div>
+                <div class="kpi-value @PlClass(kpi.AverageProfitLoss)">
+                    @FormatMoney(kpi.AverageProfitLoss)
+                </div>
+            </div>
+            <div class="kpi">
+                <div class="kpi-label">Best</div>
+                <div class="kpi-value positive">@FormatMoney(kpi.BestTradeProfitLoss)</div>
+            </div>
+            <div class="kpi">
+                <div class="kpi-label">Worst</div>
+                <div class="kpi-value negative">@FormatMoney(kpi.WorstTradeProfitLoss)</div>
+            </div>
+            <div class="kpi">
+                <div class="kpi-label">Profit factor</div>
+                <div class="kpi-value">
+                    @(kpi.ProfitFactor > 0 ? kpi.ProfitFactor.ToString("0.00") : "—")
+                </div>
+            </div>
+        </section>
+
+        <section class="card">
+            <h2>Equity curve</h2>
+            <p class="muted">Cumulative dollar P/L per closed trading day.</p>
+            @if (_curve is { Count: > 1 })
+            {
+                @RenderEquitySvg(_curve)
+            }
+            else
+            {
+                <p class="hint">Need at least two trading days to draw a curve.</p>
+            }
+        </section>
+
+        @if (_monthly is { Count: > 0 })
+        {
+            <section class="card">
+                <h2>Monthly P/L</h2>
+                <div class="monthly-bars">
+                    @{
+                        var maxAbs = _monthly.Max(m => Math.Abs(m.ProfitLoss));
+                        if (maxAbs == 0m) maxAbs = 1m; // avoid /0 on a flat row
+                    }
+                    @foreach (var m in _monthly)
+                    {
+                        var heightPct = (double)(Math.Abs(m.ProfitLoss) / maxAbs) * 100;
+                        var label = $"{m.Year}-{m.Month:D2}";
+                        var cls = m.ProfitLoss >= 0 ? "bar-up" : "bar-down";
+                        <div class="month" title="@label · @FormatMoney(m.ProfitLoss) · @m.TradeCount trade(s)">
+                            <div class="bar-wrap">
+                                <div class="bar @cls" style="height: @heightPct.ToString("0.##", CultureInfo.InvariantCulture)%"></div>
+                            </div>
+                            <div class="month-label">@label</div>
+                        </div>
+                    }
+                </div>
+            </section>
+        }
+
+        @if (_perSymbol is { Count: > 0 })
+        {
+            <section class="card">
+                <h2>By symbol</h2>
+                <table class="symbol-table">
+                    <thead>
+                        <tr>
+                            <th>Ticker</th>
+                            <th>Trades</th>
+                            <th>Win rate</th>
+                            <th>Total P/L</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var s in _perSymbol)
+                        {
+                            <tr>
+                                <td><strong>@s.Ticker</strong></td>
+                                <td>@s.TradeCount (@s.Wins W)</td>
+                                <td>@s.WinRatePercent.ToString("0.0")%</td>
+                                <td class="@PlClass(s.TotalProfitLoss)">@FormatMoney(s.TotalProfitLoss)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </section>
+        }
+    }
+</div>
+
+@code {
+    private List<Trade>? _trades;
+    private PortfolioStats.KpiSummary? _kpi;
+    private IReadOnlyList<PortfolioStats.EquityPoint>? _curve;
+    private IReadOnlyList<PortfolioStats.SymbolStats>? _perSymbol;
+    private IReadOnlyList<PortfolioStats.MonthlyStats>? _monthly;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var all = await Repository.GetAllAsync();
+        _trades = all.ToList();
+
+        if (_trades.Count > 0)
+        {
+            _kpi = PortfolioStats.ComputeKpi(_trades);
+            _curve = PortfolioStats.ComputeEquityCurve(_trades);
+            _perSymbol = PortfolioStats.ComputePerSymbol(_trades);
+            _monthly = PortfolioStats.ComputeMonthly(_trades);
+        }
+    }
+
+    private static string PlClass(decimal value) =>
+        value > 0 ? "positive" : value < 0 ? "negative" : string.Empty;
+
+    private static string FormatMoney(decimal value)
+    {
+        var sign = value > 0 ? "+" : "";
+        return $"{sign}{value.ToString("0.##", CultureInfo.InvariantCulture)} $";
+    }
+
+    /// <summary>
+    /// Hand-rolls a tiny SVG line chart instead of pulling in a charting
+    /// library. WASM bundle stays small, and we control exactly how it
+    /// renders on dark mode without fighting library theming.
+    /// </summary>
+    private RenderFragment RenderEquitySvg(IReadOnlyList<PortfolioStats.EquityPoint> curve) =>
+        builder =>
+        {
+            const double width = 800;
+            const double height = 240;
+            const double padX = 40;
+            const double padY = 20;
+
+            var minPl = (double)curve.Min(p => p.CumulativeProfitLoss);
+            var maxPl = (double)curve.Max(p => p.CumulativeProfitLoss);
+            // Pad the y-range a touch so the line never sits flush against
+            // the edge — and guarantee the band is non-zero on a flat run.
+            var span = maxPl - minPl;
+            if (span <= 0) span = 1;
+            minPl -= span * 0.05;
+            maxPl += span * 0.05;
+            span = maxPl - minPl;
+
+            var minDate = curve[0].Date;
+            var maxDate = curve[^1].Date;
+            var dateSpanDays = Math.Max(1, (maxDate - minDate).TotalDays);
+
+            string X(DateTime d) =>
+                ((padX + (width - 2 * padX) * ((d - minDate).TotalDays / dateSpanDays)))
+                .ToString("0.##", CultureInfo.InvariantCulture);
+
+            string Y(double v) =>
+                ((padY + (height - 2 * padY) * (1 - (v - minPl) / span)))
+                .ToString("0.##", CultureInfo.InvariantCulture);
+
+            // Build the polyline points and an area path under the line.
+            var points = string.Join(" ",
+                curve.Select(p => $"{X(p.Date)},{Y((double)p.CumulativeProfitLoss)}"));
+
+            var area =
+                $"M {X(curve[0].Date)},{Y(0).ToString()} " +
+                string.Join(" ",
+                    curve.Select(p => $"L {X(p.Date)},{Y((double)p.CumulativeProfitLoss)}")) +
+                $" L {X(curve[^1].Date)},{Y(0).ToString()} Z";
+
+            // Zero baseline for visual reference.
+            var zeroY = Y(0);
+
+            builder.OpenElement(0, "svg");
+            builder.AddAttribute(1, "class", "equity-svg");
+            builder.AddAttribute(2, "viewBox", $"0 0 {width} {height}");
+            builder.AddAttribute(3, "preserveAspectRatio", "none");
+
+            // Zero-baseline guide.
+            builder.OpenElement(10, "line");
+            builder.AddAttribute(11, "class", "equity-zero");
+            builder.AddAttribute(12, "x1", X(minDate));
+            builder.AddAttribute(13, "x2", X(maxDate));
+            builder.AddAttribute(14, "y1", zeroY);
+            builder.AddAttribute(15, "y2", zeroY);
+            builder.CloseElement();
+
+            // Filled area below the curve.
+            builder.OpenElement(20, "path");
+            builder.AddAttribute(21, "class", "equity-area");
+            builder.AddAttribute(22, "d", area);
+            builder.CloseElement();
+
+            // The curve itself.
+            builder.OpenElement(30, "polyline");
+            builder.AddAttribute(31, "class", "equity-line");
+            builder.AddAttribute(32, "points", points);
+            builder.CloseElement();
+
+            // Endpoint dot so the user can see the latest cumulative.
+            builder.OpenElement(40, "circle");
+            builder.AddAttribute(41, "class", "equity-end");
+            builder.AddAttribute(42, "cx", X(curve[^1].Date));
+            builder.AddAttribute(43, "cy", Y((double)curve[^1].CumulativeProfitLoss));
+            builder.AddAttribute(44, "r", "4");
+            builder.CloseElement();
+
+            // Min/max date labels.
+            builder.OpenElement(50, "text");
+            builder.AddAttribute(51, "class", "equity-axis");
+            builder.AddAttribute(52, "x", X(minDate));
+            builder.AddAttribute(53, "y", (height - 4).ToString(CultureInfo.InvariantCulture));
+            builder.AddContent(54, minDate.ToString("yyyy-MM-dd"));
+            builder.CloseElement();
+
+            builder.OpenElement(60, "text");
+            builder.AddAttribute(61, "class", "equity-axis");
+            builder.AddAttribute(62, "x", X(maxDate));
+            builder.AddAttribute(63, "y", (height - 4).ToString(CultureInfo.InvariantCulture));
+            builder.AddAttribute(64, "text-anchor", "end");
+            builder.AddContent(65, maxDate.ToString("yyyy-MM-dd"));
+            builder.CloseElement();
+
+            builder.CloseElement();
+        };
+}
+
+<style>
+    .stats-page {
+        padding: 1.5rem;
+        max-width: 1000px;
+        margin: 0 auto;
+    }
+
+    .page-header h1 { margin: 0 0 0.4rem 0; }
+    .muted { color: #a0a0b0; }
+
+    .empty-state {
+        text-align: center;
+        padding: 3rem 1rem;
+        background: #1f2328;
+        border-radius: 12px;
+    }
+
+    .status {
+        margin-top: 1rem;
+        padding: 0.75rem 1rem;
+        border-radius: 8px;
+        font-size: 0.9rem;
+    }
+
+    .status.info { background: #1e3a5f; color: #93c5fd; }
+
+    .kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 0.75rem;
+        margin-bottom: 1rem;
+    }
+
+    .kpi {
+        background: #1f2328;
+        border-radius: 10px;
+        padding: 0.85rem 1rem;
+    }
+
+    .kpi-label {
+        font-size: 0.7rem;
+        color: #a0a0b0;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .kpi-value {
+        font-size: 1.4rem;
+        font-weight: 700;
+        margin-top: 0.25rem;
+    }
+
+    .kpi-sub {
+        font-size: 0.75rem;
+        color: #8a8a99;
+        margin-top: 0.2rem;
+    }
+
+    .positive { color: #4ade80; }
+    .negative { color: #f87171; }
+
+    .card {
+        background: #1f2328;
+        border-radius: 12px;
+        padding: 1.25rem 1.5rem;
+        margin-bottom: 1rem;
+    }
+
+    .card h2 {
+        margin-top: 0;
+        margin-bottom: 0.5rem;
+    }
+
+    .hint {
+        font-size: 0.85rem;
+        color: #8a8a99;
+    }
+
+    /* --- Equity SVG ----------------------------------------------- */
+
+    .equity-svg {
+        width: 100%;
+        height: 240px;
+        margin-top: 0.5rem;
+    }
+
+    .equity-line {
+        fill: none;
+        stroke: #4ade80;
+        stroke-width: 2;
+        stroke-linejoin: round;
+        stroke-linecap: round;
+    }
+
+    .equity-area {
+        fill: rgba(74, 222, 128, 0.12);
+    }
+
+    .equity-zero {
+        stroke: #2a2f36;
+        stroke-width: 1;
+        stroke-dasharray: 3 3;
+    }
+
+    .equity-end {
+        fill: #4ade80;
+    }
+
+    .equity-axis {
+        font-size: 11px;
+        fill: #8a8a99;
+    }
+
+    /* --- Monthly bars --------------------------------------------- */
+
+    .monthly-bars {
+        display: flex;
+        gap: 0.4rem;
+        align-items: flex-end;
+        overflow-x: auto;
+        padding: 0.5rem 0;
+    }
+
+    .month {
+        flex: 0 0 auto;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.25rem;
+        min-width: 3rem;
+    }
+
+    .bar-wrap {
+        height: 120px;
+        display: flex;
+        align-items: flex-end;
+        width: 100%;
+    }
+
+    .bar {
+        width: 100%;
+        border-radius: 4px 4px 0 0;
+    }
+
+    .bar-up { background: #4ade80; }
+    .bar-down { background: #f87171; }
+
+    .month-label {
+        font-size: 0.7rem;
+        color: #a0a0b0;
+    }
+
+    /* --- Symbol table --------------------------------------------- */
+
+    .symbol-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.9rem;
+    }
+
+    .symbol-table th, .symbol-table td {
+        text-align: left;
+        padding: 0.5rem 0.6rem;
+        border-bottom: 1px solid #2a2f36;
+    }
+
+    .symbol-table th {
+        color: #a0a0b0;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+    }
+</style>

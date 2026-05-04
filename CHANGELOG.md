@@ -24,6 +24,12 @@ All notable user-facing changes go here. Dates are ISO 8601.
 - **Telegram push notifications** — optional add-on to the Worker. When
   the cron produces a Long/Short rec, the worker pings your Telegram bot
   so you get a phone notification without opening the app.
+- **CSV trade import** — `/trades/import` page accepts pasted CSV or a
+  small uploaded file, header-driven so column order is up to the user.
+  Tolerates EU-style comma decimals. Per-row errors don't kill the batch.
+- **Stats page** — `/stats` shows headline KPIs (win rate, total P/L,
+  best/worst, profit factor), a hand-rolled SVG equity curve, monthly
+  P/L bars, and a per-symbol breakdown.
 
 ### Changed
 
